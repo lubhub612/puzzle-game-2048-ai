@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import './App.css';
 
 const GRID_SIZE = 4;
+const TARGET_VALUE = 2048;
 const DIRECTIONS = {
   UP: 'up',
   DOWN: 'down',
@@ -31,7 +32,6 @@ const difficultySettings = {
 function App() {
   const [grid, setGrid] = useState(initializeGrid());
   const [score, setScore] = useState(0);
-  const [bestScore, setBestScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [aiPlaying, setAiPlaying] = useState(false);
   const [aiSpeed, setAiSpeed] = useState(200);
@@ -49,12 +49,65 @@ function App() {
   const [predictiveMoves, setPredictiveMoves] = useState([]);
   const [showPredictions, setShowPredictions] = useState(false);
   const [predictionAccuracy, setPredictionAccuracy] = useState('medium'); // 'low', 'medium', 'high'
-  const [won, setWon] = useState(false);
   const [scoreUpdated, setScoreUpdated] = useState(false);
   const [newBest, setNewBest] = useState(false); 
+  const [keepPlaying, setKeepPlaying] = useState(false); // Allow continuing after win
+  const [gameWon, setGameWon] = useState(false);
+  const [lastDirection, setLastDirection] = useState(null);
+  const [directionHighlight, setDirectionHighlight] = useState(false);
   const [scoreHistory, setScoreHistory] = useState([]);
+  const [bestScore, setBestScore] = useState(() => {
+  // Initialize from localStorage if available
+  return parseInt(localStorage.getItem('bestScore')) || 0;
+});
+  const [tileAnimations, setTileAnimations] = useState({});
+  const [showHistory, setShowHistory] = useState(false);
+
   const moveCountRef = useRef(0);
+  const moveSound = useRef(null);
+  const mergeSound = useRef(null);
+  const appearSound = useRef(null);
+  const winSound = useRef(null);
+  const loseSound = useRef(null);
+  const bestScoreSound = useRef(null);
+
+  // Initialize sounds
+  useEffect(() => {
+    moveSound.current = new Audio('/sounds/move.mp3');
+    mergeSound.current = new Audio('/sounds/merge.mp3');
+    appearSound.current = new Audio('/sounds/appear.mp3');
+    winSound.current = new Audio('/sounds/win.mp3');
+    loseSound.current = new Audio('/sounds/lose.mp3');
+    bestScoreSound.current = new Audio('/sounds/best.mp3');
+    
+    // Preload sounds
+    [moveSound, mergeSound, appearSound, winSound, loseSound, bestScoreSound].forEach(sound => {
+      sound.current.load();
+      sound.current.volume = 0.3; // Set appropriate volume
+    });
+  }, []);
+
+  const playSound = (soundRef) => {
+    if (soundRef.current) {
+      soundRef.current.currentTime = 0; // Rewind if already playing
+      soundRef.current.play().catch(e => console.log("Audio play failed:", e));
+    }
+  };
   
+  useEffect(() => {
+    // Load best score
+    const savedBest = localStorage.getItem('bestScore');
+    if (savedBest) {
+      setBestScore(parseInt(savedBest));
+    }
+  
+    // Load score history
+    const savedHistory = localStorage.getItem('scoreHistory');
+    if (savedHistory) {
+      setScoreHistory(JSON.parse(savedHistory));
+    }
+  }, []);
+
   // Initialize the grid with two random tiles
   function initializeGrid() {
     const newGrid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
@@ -84,12 +137,37 @@ function App() {
   const resetGame = useCallback(() => {
     setGrid(initializeGrid());
     setScore(0);
-    setWon(false);
+    setGameWon(false);
     setGameOver(false);
+    setKeepPlaying(false);
+    setLastDirection(null);
+    setScoreHistory(prev => [...prev, {
+      score: 0,
+      date: new Date().toISOString(),
+      status: 'started'
+    }]);
+    setTileAnimations({});
   }, []);
+
+  function checkWinCondition(grid) {
+    // Check if any tile has reached 2048
+    for (let i = 0; i < GRID_SIZE; i++) {
+      for (let j = 0; j < GRID_SIZE; j++) {
+        if (grid[i][j] === TARGET_VALUE) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
 
   // Check if the game is over (no moves left)
   function checkGameOver(grid) {
+    const hasEmptyCell = grid.some(row => row.some(cell => cell === 0));
+  if (hasEmptyCell) {
+    return false; // Game can continue
+  }
+
     // Check if there are empty cells
     for (let i = 0; i < GRID_SIZE; i++) {
       for (let j = 0; j < GRID_SIZE; j++) {
@@ -110,13 +188,38 @@ function App() {
         }
       }
     }
-    
+
+    for (let i = 0; i < GRID_SIZE; i++) {
+      for (let j = 0; j < GRID_SIZE; j++) {
+        const current = grid[i][j];
+        
+        // Check right neighbor
+        if (j < 3 && grid[i][j + 1] === current) {
+          return false;
+        }
+        
+        // Check bottom neighbor
+        if (i < 3 && grid[i + 1][j] === current) {
+          return false;
+        }
+      }
+    }
+
+    setGameOver(true);
+    addToScoreHistory(score);
+    playSound(loseSound);
     return true;
   }
 
   // Move tiles in the specified direction
   const moveTiles = useCallback((direction) => {
-    if (gameOver) return false;
+    if (gameOver && !keepPlaying) return false;
+
+    setLastDirection(direction);
+    setDirectionHighlight(true);
+    
+    // Remove highlight after animation completes
+    setTimeout(() => setDirectionHighlight(false), 200);
     
     // Create a deep copy of the grid
     const newGrid = grid.map(row => [...row]);
@@ -193,19 +296,35 @@ function App() {
     }
   
     if (moved) {
-      addRandomTile(newGrid);
+      playSound(moveSound);
+      setTimeout(() => {
+        addRandomTile(newGrid);
       const newScore = score + scoreIncrease;
-      setScore(newScore);
-      setBestScore(prev => Math.max(prev, newScore));
+      setScore(newScore); 
+      setScoreUpdated(true);
       setGrid(newGrid);
-      
-      if (checkGameOver(newGrid)) {
-        setGameOver(true);
+      checkGameOver(newGrid)
+      if (newScore > bestScore) {
+        setBestScore(newScore);
+        addToScoreHistory(newScore);
       }
+      const isNewBest = updateBestScore(newScore);
+      if (isNewBest) {
+        playSound(bestScoreSound);      
+      } 
+      if (!gameWon && checkWinCondition(newGrid)) {
+        setGameWon(true);
+        playSound(winSound);
+      }
+    }, 100);
+      
+
+      setTimeout(() => setScoreUpdated(false), 300);
+      
     }
   
     return moved;
-  }, [grid, score, gameOver]);
+  }, [grid, score, gameOver, keepPlaying, gameWon]);
 
   // Process a single row/column (left movement logic)
   function processRow(row) {
@@ -658,7 +777,7 @@ function calculateTrappedPenalty(grid) {
 
   // AI move logic
   useEffect(() => {
-    if (!aiPlaying || gameOver) return;
+    if (!aiPlaying || gameOver || (gameWon && !keepPlaying)) return;
     
 
     const { depth, delay, speed } = difficultySettings[adaptiveDifficulty.currentLevel];
@@ -696,7 +815,7 @@ function calculateTrappedPenalty(grid) {
   
     const timer = setTimeout(makeAiMove, speed === aiSpeed ? aiSpeed : speed);
     return () => clearTimeout(timer);
-  }, [aiPlaying, aiThinking, gameOver, moveTiles, grid, adaptiveDifficulty, aiDepth]);
+  }, [aiPlaying, aiThinking, gameOver, gameWon, keepPlaying, moveTiles, grid, adaptiveDifficulty, aiDepth]);
 
   function calculateBestMove(currentGrid) {
     // Try all possible directions with scoring
@@ -1170,29 +1289,6 @@ function addTileAtPosition(grid, emptyCells, value) {
   newGrid[i][j] = value;
   return newGrid;
 }
-/*
-function addRandomTileCopy(grid) {
-  // Create a deep copy of the grid to avoid mutation
-  const newGrid = JSON.parse(JSON.stringify(grid));
-  
-  // Find all empty cells
-  const emptyCells = [];
-  for (let i = 0; i < GRID_SIZE; i++) {
-    for (let j = 0; j < GRID_SIZE; j++) {
-      if (newGrid[i][j] === 0) {
-        emptyCells.push({ row: i, col: j });
-      }
-    }
-  }
-
-  // If there are empty cells, add a random tile (90% chance of 2, 10% chance of 4)
-  if (emptyCells.length > 0) {
-    const { row, col } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
-    newGrid[row][col] = Math.random() < 0.9 ? 2 : 4;
-  }
-
-  return newGrid;
-} */
 
   const addRandomTileCopy = useCallback((grid, options = {}) => {
     // Cache empty cells to avoid recalculating
@@ -1241,6 +1337,30 @@ function addRandomTileCopy(grid) {
     
     return grid[row][col] ?? 0;
   }
+
+  
+  const updateBestScore = (newScore) => {
+    if (newScore > bestScore) {
+      const newBest = Math.max(newScore, bestScore);
+      setBestScore(newBest);
+      setNewBest(true); 
+      setTimeout(() => setNewBest(false), 1500);
+      localStorage.setItem('bestScore', newBest.toString());
+      return true;
+    }
+    return false;
+  };
+  
+  const addToScoreHistory = (score) => {
+    const newHistory = [...scoreHistory, {
+      score,
+      date: new Date().toISOString(),
+      grid: JSON.stringify(grid) // Optional: store final grid state
+    }].slice(-10); // Keep only last 10 games
+    
+    setScoreHistory(newHistory);
+    localStorage.setItem('scoreHistory', JSON.stringify(newHistory));
+  };
 
   useEffect(() => {
     if (!aiPlaying) return;
@@ -1313,6 +1433,19 @@ useEffect(() => {
   }
 }, [memoizedPredictions, showPredictions]);
 
+useEffect(() => {
+  if (gameWon) {
+    playSound(winSound);
+  } else if (gameOver) {
+    playSound(loseSound);
+  }
+}, [gameWon, gameOver]);
+
+const clearHistory = () => {
+  setScoreHistory([]);
+  localStorage.removeItem('scoreHistory');
+};
+
   // Change AI speed
   const changeAiSpeed = (e) => {
     setAiSpeed(getDynamicSpeed(parseInt(e.target.value)).toFixed(0));
@@ -1344,21 +1477,111 @@ useEffect(() => {
     return colors[value] || '#3c3a32';
   };
 
+  const getDirectionHighlightStyle = () => {
+    if (!directionHighlight || !lastDirection) return {};
+    
+    const baseStyle = {
+      position: 'absolute',
+      width: '100%',
+      height: '100%',
+      borderRadius: '6px',
+      pointerEvents: 'none',
+      opacity: 0.3,
+      animation: 'pulse 0.2s ease-out',
+    };
+
+    switch (lastDirection) {
+      case 'up':
+        return {
+          ...baseStyle,
+          background: 'linear-gradient(to bottom, rgba(255,255,255,0.8), rgba(255,255,255,0))',
+          top: 0,
+        };
+      case 'down':
+        return {
+          ...baseStyle,
+          background: 'linear-gradient(to top, rgba(255,255,255,0.8), rgba(255,255,255,0))',
+          bottom: 0,
+        };
+      case 'left':
+        return {
+          ...baseStyle,
+          background: 'linear-gradient(to right, rgba(255,255,255,0.8), rgba(255,255,255,0))',
+          left: 0,
+        };
+      case 'right':
+        return {
+          ...baseStyle,
+          background: 'linear-gradient(to left, rgba(255,255,255,0.8), rgba(255,255,255,0))',
+          right: 0,
+        };
+      default:
+        return {};
+    }
+  };
+
+  const ScoreHistory = ({ history }) => {
+    return (
+      <div className="score-history">
+        <h3>Recent Games</h3>
+        <div className="history-actions">
+            <button onClick={clearHistory} className="clear-history">
+                Clear History
+            </button>
+        </div>
+        <div className="history-list">
+          {history.length > 0 ? (
+            history.map((game, index) => (
+              <div key={index} className="history-item">
+                <span className="history-score">{game.score}</span>
+                <span className="history-date">
+                  {new Date(game.date).toLocaleString()}
+                </span>
+              </div>
+            ))
+          ) : (
+            <p>No games played yet</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app">
       <div className="header">
-        <h1>2048</h1>
+      <p>Join the numbers and get to the <strong>2048 tile!</strong></p>
         <div className="scores">
           <div className="score-box">
             <div className="score-label">SCORE</div>
-            <div className="score-value">{score}</div>
+            <div className={`score-value ${scoreUpdated ? 'score-update' : ''}`}>{score}</div>
           </div>
           <div className="score-box">
             <div className="score-label">BEST</div>
-            <div className="score-value">{bestScore}</div>
+            <div className={`score-value best-score ${newBest ? 'new-best' : ''}`}> {bestScore}</div>
           </div>
+          <button 
+      className="history-toggle"
+      onClick={() => setShowHistory(!showHistory)}
+    >
+      {showHistory ? 'Hide History' : 'Show History'}
+    </button>
         </div>
+        <button 
+    className="sound-toggle"
+    onClick={() => {
+      [moveSound, mergeSound, appearSound, winSound, loseSound, bestScoreSound].forEach(sound => {
+        if (sound.current) {
+          sound.current.muted = !sound.current.muted;
+        }
+      });
+    }}
+    aria-label="Toggle sound"
+  >
+    🔈
+  </button>
       </div>
+      {showHistory && <ScoreHistory history={scoreHistory} />}
       
       <div className="controls">
         <button onClick={resetGame}>New Game</button>
@@ -1448,14 +1671,80 @@ useEffect(() => {
   ))}
 </div>
        
-        
+{gameWon && !keepPlaying && (
+  <div className="win-modal">
+    <div className="win-content">
+      <h2>You Win!</h2>
+      <p>Congratulations! You reached 2048!</p>
+      <div className="win-buttons">
+        <button 
+          onClick={() => setKeepPlaying(true)}
+          className="keep-playing-button"
+        >
+          Keep Playing
+        </button>
+        <button 
+          onClick={resetGame}
+          className="new-game-button"
+        >
+          New Game
+        </button>
+      </div>
+    </div>
+  </div>
+)}
+
         {gameOver && (
           <div className="game-over">
             <div>Game Over!</div>
             <button onClick={resetGame}>Try Again</button>
           </div>
         )}
+
+<div className="game-status">
+  {gameWon && (
+    <div className="win-indicator">
+      <span>🏆 You Won! </span>
+      {keepPlaying && <span>(Continuing)</span>}
+    </div>
+  )}
+  {gameOver && !gameWon && (
+    <div className="game-over-indicator">Game Over!</div>
+  )}
+</div>
+{directionHighlight && (
+          <div className="direction-highlight" style={getDirectionHighlightStyle()}></div>
+        )}
       </div>
+      <div className="direction-hints">
+        <button 
+          className={`direction-btn up ${lastDirection === 'up' && directionHighlight ? 'active' : ''}`} 
+          onClick={() => moveTiles('up')}
+        >
+          ↑
+        </button>
+        <div className="horizontal-buttons">
+          <button 
+            className={`direction-btn left ${lastDirection === 'left' && directionHighlight ? 'active' : ''}`} 
+            onClick={() => moveTiles('left')}
+          >
+            ←
+          </button>
+          <button 
+            className={`direction-btn down ${lastDirection === 'down' && directionHighlight ? 'active' : ''}`} 
+            onClick={() => moveTiles('down')}
+          >
+            ↓
+          </button>
+          <button 
+            className={`direction-btn right ${lastDirection === 'right' && directionHighlight ? 'active' : ''}`} 
+            onClick={() => moveTiles('right')}
+          >
+            →
+          </button>
+        </div>
+      </div>
+
       <div className="hint-controls">
   <button 
     onClick={() => {
