@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import './App.css';
 
 const GRID_SIZE = 4;
@@ -21,6 +21,12 @@ const HEURISTIC_WEIGHTS = {
   trappedPenalty: 10.0   // Penalty for trapped tiles
 };
 
+const difficultySettings = {
+  easy: { depth: 2, speed: 300, delay: 1500  },
+  medium: { depth: 3, speed: 200 , delay: 1000},
+  hard: { depth: 4, speed: 150, delay: 800 },
+  expert: { depth: 5, speed: 100, delay: 500 }
+};
 
 function App() {
   const [grid, setGrid] = useState(initializeGrid());
@@ -31,7 +37,24 @@ function App() {
   const [aiSpeed, setAiSpeed] = useState(200);
   const [aiDepth, setAiDepth] = useState(3);
   const [aiThinking, setAIThinking] = useState(false);
-
+  const [hintDirection, setHintDirection] = useState(null);
+  const [showHints, setShowHints] = useState(false);
+  const [aiDifficulty, setAiDifficulty] = useState('medium'); // 'easy', 'medium', 'hard', 'expert'
+  const [adaptiveDifficulty, setAdaptiveDifficulty] = useState({
+    baseLevel: 'medium', // Starting difficulty
+    currentLevel: 'medium',
+    performanceHistory: [], // Tracks player performance
+    lastAdjustment: 0, // Last time difficulty was changed
+  });
+  const [predictiveMoves, setPredictiveMoves] = useState([]);
+  const [showPredictions, setShowPredictions] = useState(false);
+  const [predictionAccuracy, setPredictionAccuracy] = useState('medium'); // 'low', 'medium', 'high'
+  const [won, setWon] = useState(false);
+  const [scoreUpdated, setScoreUpdated] = useState(false);
+  const [newBest, setNewBest] = useState(false); 
+  const [scoreHistory, setScoreHistory] = useState([]);
+  const moveCountRef = useRef(0);
+  
   // Initialize the grid with two random tiles
   function initializeGrid() {
     const newGrid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
@@ -61,6 +84,7 @@ function App() {
   const resetGame = useCallback(() => {
     setGrid(initializeGrid());
     setScore(0);
+    setWon(false);
     setGameOver(false);
   }, []);
 
@@ -635,14 +659,20 @@ function calculateTrappedPenalty(grid) {
   // AI move logic
   useEffect(() => {
     if (!aiPlaying || gameOver) return;
-    setAIThinking(true);
+    
+
+    const { depth, delay, speed } = difficultySettings[adaptiveDifficulty.currentLevel];
+    
     const makeAiMove = async () => {
-      
+      setAIThinking(true);
       try {
         // Get the best move using Expectimax algorithm
        // const bestMove = getBestMove();
-       const bestMove = calculateBestMove(grid);
-        
+      // const bestMove = calculateBestMove(grid, depth);
+     // const bestMove = calculateBestMove(grid);
+
+     const bestMove = calculateBestMove(grid, depth);
+
         if (bestMove) {
           // Execute the move
           const moved = moveTiles(bestMove);
@@ -657,16 +687,16 @@ function calculateTrappedPenalty(grid) {
         }
         setTimeout(() => {
             setAIThinking(false);
-        }, 100);
+        }, delay);
       } catch (error) {
         console.error("AI decision error:", error);
         setAiPlaying(false); // Stop AI on error
       }
     };
   
-    const timer = setTimeout(makeAiMove, aiSpeed);
+    const timer = setTimeout(makeAiMove, speed === aiSpeed ? aiSpeed : speed);
     return () => clearTimeout(timer);
-  }, [aiPlaying, aiThinking, gameOver, moveTiles, aiSpeed, grid, aiDepth]);
+  }, [aiPlaying, aiThinking, gameOver, moveTiles, grid, adaptiveDifficulty, aiDepth]);
 
   function calculateBestMove(currentGrid) {
     // Try all possible directions with scoring
@@ -759,11 +789,29 @@ function calculateTrappedPenalty(grid) {
     }
     
     return null; // No valid moves found
-  }
+  }  
 
-  
+   
+  function evaluateMove(grid, direction, difficulty) {
+    const baseScore = evaluateBaseMove(grid, direction);
+    
+    // Apply difficulty modifiers
+    switch (difficulty) {
+      case 'easy':
+        return baseScore * 0.8; // Less optimal choices
+      case 'medium':
+        return baseScore;
+      case 'hard':
+        return baseScore * 1.2; // More optimal choices
+      case 'expert':
+        return baseScore * 1.5 + evaluateStrategicPosition(grid, direction);
+      default:
+        return baseScore;
+    }
+  }      
+    
 
-    function evaluateMove(grid, direction) {
+    function evaluateBaseMove(grid, direction) {
       const testGrid = JSON.parse(JSON.stringify(grid));
       let score = 0;
       
@@ -818,38 +866,93 @@ function calculateTrappedPenalty(grid) {
       // Add additional heuristic scoring
       score += countEmptyCells(testGrid) * 10;
       score += getMaxValue(testGrid) * 2;
-      score += isMaxValueInCorner(testGrid) * 0.1;
-      score += calculateMonotonicity(testGrid) * 1.5;
+      score += isMaxValueInCorner(testGrid) * 50; // Higher weight for corner strategy
+    score += calculateMonotonicity(testGrid) * 1.5;
+    score += calculateSmoothness(testGrid) * 0.5;
       
       return score;
   }
 
-  function validateGrid(grid) {
-    if (!grid || !Array.isArray(grid) || grid.length !== GRID_SIZE) {
-      return false;
-    }
-    return grid.every(row => 
-      Array.isArray(row) && 
-      row.length === GRID_SIZE &&
-      row.every(cell => typeof cell === 'number')
-    );
-  }
-
-  function safeReverse(array) {
-    if (!Array.isArray(array)) {
-      console.warn("Attempted to reverse non-array:", array);
-      return [];
-    }
-    return [...array].reverse(); // Return new array
-  }
-
-  function safeGridAccess(grid, row, col) {
-    // Handle edge cases safely
-    if (!grid || !Array.isArray(grid)) return 0;
-    if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) return 0;
-    if (!Array.isArray(grid[row])) return 0;
+  function evaluateStrategicPosition(grid, direction) {
+    // Expert-level strategic evaluation
+    let score = 0;
     
-    return grid[row][col] ?? 0;
+    // Prefer keeping high values in corners
+    const maxValue = Math.max(...grid.flat());
+    if ((direction === DIRECTIONS.LEFT && grid[0][0] === maxValue) ||
+        (direction === DIRECTIONS.UP && grid[0][0] === maxValue)) {
+      score += 50;
+    }
+    
+    // Penalize moves that create trapped tiles
+    score -= calculateTrappedPenalty(grid, direction) * 20;
+    
+    return score;
+  }
+
+  function calculateHint() {
+    if (gameOver) return null;
+  
+    const testGrid = JSON.parse(JSON.stringify(grid));
+    const moves = [];
+    
+    // Test each direction with look-ahead
+    for (const direction of Object.values(DIRECTIONS)) {
+      if (!isMoveValid(testGrid, direction)) continue;
+      
+      const simulation = simulateMoveWithLookahead(testGrid, direction, 2);
+      moves.push({
+        direction,
+        score: simulation.score,
+        futureOptions: simulation.futureOptions
+      });
+    }
+  
+    if (moves.length === 0) return null;
+  
+    // Weighted scoring considering immediate and future moves
+    moves.forEach(move => {
+      move.combinedScore = move.score * 1.5 + move.futureOptions * 0.5;
+    });
+  
+    moves.sort((a, b) => b.combinedScore - a.combinedScore);
+    return moves[0].direction;
+  }
+  
+  function simulateMoveWithLookahead(grid, direction, depth) {
+    if (depth === 0) return { score: 0, futureOptions: 0 };
+    
+    const testGrid = JSON.parse(JSON.stringify(grid));
+    const moved = simulateMove(testGrid, direction);
+    
+    if (!moved) return { score: -Infinity, futureOptions: 0 };
+    
+    // Add random tile for lookahead
+    addRandomTile(testGrid);
+    
+    // Evaluate current move
+    const score = evaluateMove(grid, direction);
+    
+    // Count future options
+    let futureOptions = 0;
+    for (const dir of Object.values(DIRECTIONS)) {
+      if (simulateMove(JSON.parse(JSON.stringify(testGrid)), dir)) {
+        futureOptions++;
+      }
+    }
+    
+    // Recurse if needed
+    if (depth > 1) {
+      const futureMoves = [];
+      for (const dir of Object.values(DIRECTIONS)) {
+        const result = simulateMoveWithLookahead(testGrid, dir, depth - 1);
+        futureMoves.push(result);
+      }
+      const bestFuture = Math.max(...futureMoves.map(m => m.score));
+      return { score: score + bestFuture * 0.3, futureOptions };
+    }
+    
+    return { score, futureOptions };
   }
   
   function isMoveValid(grid, direction) {
@@ -903,7 +1006,259 @@ function calculateTrappedPenalty(grid) {
       }
       
       return moved;
-  } 
+  }
+
+  function calculateAdaptiveDifficulty(currentState, gameStats) {
+    const { score, bestScore, moveCount, gameOver } = gameStats;
+    const { performanceHistory, lastAdjustment, baseLevel } = currentState;
+    
+    // Don't adjust too frequently (minimum 10 moves between changes)
+    if (moveCount - lastAdjustment < 10 && !gameOver) return currentState;
+    
+    const newHistory = [...performanceHistory, {
+      score,
+      moveCount,
+      timestamp: Date.now()
+    }].slice(-20); // Keep last 20 data points
+    
+    // Calculate performance metrics
+    const avgScore = newHistory.reduce((sum, entry) => sum + entry.score, 0) / newHistory.length;
+    const scoreTrend = newHistory.length > 1 ? 
+      (newHistory[newHistory.length - 1].score - newHistory[0].score) / newHistory.length : 0;
+    
+    const difficultyLevels = ['easy', 'medium', 'hard', 'expert'];
+    let currentIndex = difficultyLevels.indexOf(currentState.currentLevel);
+    
+    // Adjust difficulty based on performance
+    if (gameOver) {
+      // Make easier if player lost
+      currentIndex = Math.max(0, currentIndex - 1);
+    } else if (score > bestScore * 1.3 && scoreTrend > 0) {
+      // Player is improving - increase challenge
+      currentIndex = Math.min(difficultyLevels.length - 1, currentIndex + 1);
+    } else if (score < bestScore * 0.7 && scoreTrend < 0) {
+      // Player is struggling - decrease challenge
+      currentIndex = Math.max(0, currentIndex - 1);
+    }
+    
+    return {
+      ...currentState,
+      currentLevel: difficultyLevels[currentIndex],
+      performanceHistory: newHistory,
+      lastAdjustment: moveCount
+    };
+  }
+
+  function calculatePerformancePercentage() {
+    const { performanceHistory, currentLevel } = adaptiveDifficulty;
+    if (performanceHistory.length < 2) return 50;
+    
+    const levels = ['easy', 'medium', 'hard', 'expert'];
+    const levelIndex = levels.indexOf(currentLevel);
+    const maxIndex = levels.length - 1;
+    
+    return ((levelIndex / maxIndex) * 100) - 
+      (performanceHistory.slice(-5).reduce((sum, entry) => 
+        sum + (entry.score < bestScore * 0.8 ? 10 : -10), 0));
+  }
+  
+  function getPerformanceColor() {
+    const percentage = calculatePerformancePercentage();
+    if (percentage < 30) return '#4CAF50'; // Green (easy)
+    if (percentage < 60) return '#FFC107'; // Yellow (medium)
+    if (percentage < 85) return '#FF9800'; // Orange (hard)
+    return '#F44336'; // Red (expert)
+  }
+
+  function getDynamicSpeed(baseSpeed) {
+  const recentPerformance = adaptiveDifficulty.performanceHistory.slice(-5);
+  if (recentPerformance.length < 3) return baseSpeed;
+  
+  const avgScore = recentPerformance.reduce((sum, entry) => sum + entry.score, 0) / recentPerformance.length;
+  const scoreRatio = avgScore / bestScore;
+  
+  // Adjust speed based on performance
+  if (scoreRatio > 1.2) return baseSpeed * 0.8; // Faster for strong players
+  if (scoreRatio < 0.8) return baseSpeed * 1.2; // Slower for struggling players
+  return baseSpeed;
+}
+
+
+function getPerformanceTip() {
+  const { currentLevel, performanceHistory } = adaptiveDifficulty;
+  const recent = performanceHistory.slice(-5);
+  
+  if (recent.length < 3) return "Keep playing to get personalized tips!";
+  
+  const avgMoves = recent.reduce((sum, entry) => sum + entry.moveCount, 0) / recent.length;
+  
+  if (currentLevel === 'easy' && avgMoves > 50) {
+    return "Try to keep your highest number in a corner!";
+  }
+  
+  if (currentLevel === 'medium' && avgMoves > 30) {
+    return "Plan ahead - think about where new tiles will appear!";
+  }
+  
+  // Add more tips...
+}
+
+function calculatePredictions() {
+  if (gameOver) return [];
+  
+  const predictions = [];
+  const directions = Object.values(DIRECTIONS);
+  
+  for (const direction of directions) {
+    // Create deep copy of grid
+    const testGrid = JSON.parse(JSON.stringify(grid));
+    
+    // Simulate the move
+    const moved = simulateMove(testGrid, direction);
+    
+    if (moved) {
+      // Add random tile for each possible new tile position
+      const emptyCells = [];
+      for (let i = 0; i < GRID_SIZE; i++) {
+        for (let j = 0; j < GRID_SIZE; j++) {
+          if (testGrid[i][j] === 0) {
+            emptyCells.push({i, j});
+          }
+        }
+      }
+      let outcomes;
+  switch (predictionAccuracy) {
+    case 'low':
+      outcomes = [{ grid: addRandomTileCopy(testGrid), value: '?' }];
+      break;
+    case 'high':
+      outcomes = [
+        { grid: addTileAtPosition(testGrid, emptyCells, 2), value: 2, probability: '90%' },
+        { grid: addTileAtPosition(testGrid, emptyCells, 4), value: 4, probability: '10%' },
+        ...(emptyCells.length > 1 ? [
+          { grid: addTileAtPosition(testGrid, emptyCells, 2, 1), value: 2, probability: '90%' }
+        ] : [])
+      ];
+      break;
+    case 'medium':
+    default:
+      outcomes = [
+        { grid: addTileAtPosition(testGrid, emptyCells, 2), value: 2 },
+        { grid: addTileAtPosition(testGrid, emptyCells, 4), value: 4 }
+      ];
+  }
+      
+      // Create predictions for most likely outcomes (2 and 4 in random positions)
+      const prediction = {
+        direction,
+        outcomes
+      };
+      
+      predictions.push(prediction);
+    }
+  }
+  
+  return predictions;
+}
+
+function addTileAtPosition(grid, emptyCells, value) {
+  if (emptyCells.length === 0) return grid;
+  
+  const newGrid = JSON.parse(JSON.stringify(grid));
+  const randomIndex = Math.floor(Math.random() * emptyCells.length);
+  const {i, j} = emptyCells[randomIndex];
+  newGrid[i][j] = value;
+  return newGrid;
+}
+/*
+function addRandomTileCopy(grid) {
+  // Create a deep copy of the grid to avoid mutation
+  const newGrid = JSON.parse(JSON.stringify(grid));
+  
+  // Find all empty cells
+  const emptyCells = [];
+  for (let i = 0; i < GRID_SIZE; i++) {
+    for (let j = 0; j < GRID_SIZE; j++) {
+      if (newGrid[i][j] === 0) {
+        emptyCells.push({ row: i, col: j });
+      }
+    }
+  }
+
+  // If there are empty cells, add a random tile (90% chance of 2, 10% chance of 4)
+  if (emptyCells.length > 0) {
+    const { row, col } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+    newGrid[row][col] = Math.random() < 0.9 ? 2 : 4;
+  }
+
+  return newGrid;
+} */
+
+  const addRandomTileCopy = useCallback((grid, options = {}) => {
+    // Cache empty cells to avoid recalculating
+    const emptyCells = grid.reduce((cells, row, rowIndex) => {
+      row.forEach((cell, colIndex) => {
+        if (cell === 0) cells.push({ row: rowIndex, col: colIndex });
+      });
+      return cells;
+    }, []);
+  
+    if (emptyCells.length === 0) return grid;
+  
+    const newGrid = [...grid.map(row => [...row])];
+    const { row, col } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
+    
+    newGrid[row][col] = options.value || (Math.random() < 0.9 ? 2 : 4);
+    
+    
+    return newGrid;
+  }, []);
+
+  function validateGrid(grid) {
+    if (!grid || !Array.isArray(grid) || grid.length !== GRID_SIZE) {
+      return false;
+    }
+    return grid.every(row => 
+      Array.isArray(row) && 
+      row.length === GRID_SIZE &&
+      row.every(cell => typeof cell === 'number')
+    );
+  }
+
+  function safeReverse(array) {
+    if (!Array.isArray(array)) {
+      console.warn("Attempted to reverse non-array:", array);
+      return [];
+    }
+    return [...array].reverse(); // Return new array
+  }
+
+  function safeGridAccess(grid, row, col) {
+    // Handle edge cases safely
+    if (!grid || !Array.isArray(grid)) return 0;
+    if (row < 0 || row >= GRID_SIZE || col < 0 || col >= GRID_SIZE) return 0;
+    if (!Array.isArray(grid[row])) return 0;
+    
+    return grid[row][col] ?? 0;
+  }
+
+  useEffect(() => {
+    if (!aiPlaying) return;
+  
+    setAdaptiveDifficulty(prev => calculateAdaptiveDifficulty(prev, {
+      score,
+      bestScore,
+      moveCount: moveCountRef.current, // Track moves separately
+      gameOver
+    }));
+  }, [score, gameOver, aiPlaying]);
+  
+  // Track move count separately
+  
+  useEffect(() => {
+    if (aiPlaying) moveCountRef.current++;
+  }, [grid]); // Increment when grid changes
+
 
   // Toggle AI play
   const toggleAi = useCallback(() => {
@@ -920,11 +1275,47 @@ function calculateTrappedPenalty(grid) {
     });
   }, [gameOver, resetGame]);
 
+  useEffect(() => {
+    if (!showHints || gameOver || aiPlaying) return;
   
+    const hintInterval = setInterval(() => {
+      const hint = calculateHint();
+      setHintDirection(hint);
+    }, 3000); // Update hint every 3 seconds
+  
+    return () => clearInterval(hintInterval);
+  }, [showHints, gameOver, aiPlaying, grid]);
+
+  useEffect(() => {
+    if (!aiPlaying) return;
+    
+    // Increase difficulty if player is winning
+    if (score > bestScore * 1.5) {
+      setAiDifficulty(prev => {
+        const levels = ['easy', 'medium', 'hard', 'expert'];
+        const currentIndex = levels.indexOf(prev);
+        return currentIndex < levels.length - 1 ? levels[currentIndex + 1] : prev;
+      });
+    }
+  }, [score, bestScore, aiPlaying]);
+
+  // Memoize predictions to avoid expensive recalculations
+const memoizedPredictions = useMemo(() => {
+  if (showPredictions) {
+    return calculatePredictions();
+  }
+  return [];
+}, [grid, showPredictions]);
+
+useEffect(() => {
+  if (showPredictions) {
+    setPredictiveMoves(memoizedPredictions);
+  }
+}, [memoizedPredictions, showPredictions]);
 
   // Change AI speed
   const changeAiSpeed = (e) => {
-    setAiSpeed(parseInt(e.target.value));
+    setAiSpeed(getDynamicSpeed(parseInt(e.target.value)).toFixed(0));
   };
 
   // Change AI depth
@@ -972,6 +1363,19 @@ function calculateTrappedPenalty(grid) {
       <div className="controls">
         <button onClick={resetGame}>New Game</button>
         <div className="ai-control-panel">
+        <div className="difficulty-selector">
+  <label>AI Difficulty:</label>
+  <select 
+    value={aiDifficulty} 
+    onChange={(e) => setAiDifficulty(e.target.value)}
+    disabled={aiPlaying}
+  >
+    <option value="easy">Easy</option>
+    <option value="medium">Medium</option>
+    <option value="hard">Hard</option>
+    <option value="expert">Expert</option>
+  </select>
+</div>
   <button 
     onClick={toggleAi}
     disabled={gameOver}
@@ -986,58 +1390,64 @@ function calculateTrappedPenalty(grid) {
   </button>
   
   {aiPlaying && (
-    <div className="ai-settings">
-      <div className="ai-setting">
-        <label>Speed:</label>
-        <input
-          type="range"
-          min="50"
-          max="500"
-          value={aiSpeed}
-          onChange={(e) => setAiSpeed(parseInt(e.target.value))}
-        />
-        <span>{aiSpeed}ms</span>
-      </div>
-      <div className="ai-setting">
-        <label>Depth:</label>
-        <input
-          type="range"
-          min="1"
-          max="5"
-          value={aiDepth}
-          onChange={(e) => setAiDepth(parseInt(e.target.value))}
-        />
-        <span>{aiDepth}</span>
-      </div>
-    </div>
+    <div className="ai-speed-control">
+    <label>Speed (ms): </label>
+    <input
+      type="range"
+      min="50"
+      max="500"
+      value={aiSpeed}
+      onChange={changeAiSpeed}
+    />
+    <span>{ aiSpeed} ms</span>
+  </div>
   )}
+</div>
+<div className="adaptive-difficulty-display">
+  <div className="difficulty-level">
+    Current Challenge: <span>{adaptiveDifficulty.currentLevel.toUpperCase()}</span>
+  </div>
+  <div className="performance-meter">
+    <div 
+      className="meter-fill"
+      style={{
+        width: `${calculatePerformancePercentage()}%`,
+        backgroundColor: getPerformanceColor()
+      }}
+    ></div>
+  </div>
 </div>
 {aiThinking && <div className="ai-thinking">AI is thinking...</div>}
       </div>
-      
       <div className="game-container"
        tabIndex={0} // Make the div focusable
        onKeyDown={(e) => e.preventDefault()}  // For debugging
         >
         <div className="grid">
-          {grid.map((row, rowIndex) => (
-            <div key={rowIndex} className="grid-row">
-              {row.map((cell, colIndex) => (
-                <div 
-                  key={colIndex} 
-                  className="grid-cell"
-                  style={{ 
-                    backgroundColor: getTileColor(cell),
-                    color: cell > 4 ? '#f9f6f2' : '#776e65',
-                    fontSize: cell < 100 ? '55px' : cell < 1000 ? '45px' : '35px'
-                  }}
-                >
-                  {cell !== 0 ? cell : ''}
-                </div>
-              ))}
-            </div>
-          ))}
+  {grid.map((row, rowIndex) => (
+    <div key={rowIndex} className="grid-row">
+      {row.map((cell, colIndex) => (
+        <div
+          key={colIndex}
+          className={`grid-cell ${
+            showHints && hintDirection 
+              ? `hint-${hintDirection.toLowerCase()}` 
+              : ''
+          }`}
+          style={{ 
+            backgroundColor: getTileColor(cell),
+            color: cell > 4 ? '#f9f6f2' : '#776e65',
+            fontSize: cell < 100 ? '55px' : cell < 1000 ? '45px' : '35px',
+            position: 'relative' // Needed for hint arrows
+          }}
+        >
+          {cell !== 0 ? cell : ''}
         </div>
+      ))}
+    </div>
+  ))}
+</div>
+       
         
         {gameOver && (
           <div className="game-over">
@@ -1046,7 +1456,95 @@ function calculateTrappedPenalty(grid) {
           </div>
         )}
       </div>
-      
+      <div className="hint-controls">
+  <button 
+    onClick={() => {
+      const hint = calculateHint();
+      setHintDirection(hint);
+      setShowHints(true);
+      setTimeout(() => setShowHints(false), 2000); // Auto-hide after 2 seconds
+    }}
+    disabled={gameOver || aiPlaying}
+  >
+    Show Hint
+  </button>
+  
+  <label className="hint-toggle">
+    <input 
+      type="checkbox" 
+      checked={showHints} 
+      onChange={(e) => setShowHints(e.target.checked)} 
+    />
+    Auto-hints
+  </label>
+</div>
+<button
+  className="reset-adaptive-button"
+  onClick={() => setAdaptiveDifficulty(prev => ({
+    ...prev,
+    currentLevel: prev.baseLevel,
+    performanceHistory: [],
+    lastAdjustment: 0
+  }))}
+>
+  Reset Difficulty
+</button>
+<button 
+  className="prediction-toggle"
+  onClick={() => {
+    if (!showPredictions) {
+      setPredictiveMoves(calculatePredictions());
+    }
+    setShowPredictions(!showPredictions);
+  }}
+  disabled={gameOver || aiPlaying}
+>
+  {showPredictions ? 'Hide Predictions' : 'Show Next Moves'}
+</button>
+
+{showPredictions && !gameOver && !aiPlaying && (
+  <div className="predictions-container">
+    <h3>Possible Next Moves:</h3>
+    <div className="predictions-grid">
+      {predictiveMoves.map((prediction, index) => (
+        <div key={index} className="prediction-direction">
+          <h4>{prediction.direction.toUpperCase()}</h4>
+          <div className="possible-outcomes">
+            {prediction.outcomes.map((outcome, idx) => (
+              <div key={idx} className="outcome">
+                <div className="outcome-label">New: {outcome.value} {outcome.probability}</div>
+                <div className="predicted-grid">
+                  {outcome.grid.map((row, i) => (
+                    <div key={i} className="predicted-row">
+                      {row.map((cell, j) => (
+                        <div 
+                          key={j}
+                          className="predicted-cell"
+                          style={{
+                            backgroundColor: getTileColor(cell),
+                            color: cell > 4 ? '#f9f6f2' : '#776e65',
+                            fontSize: cell < 100 ? '20px' : cell < 1000 ? '16px' : '12px'
+                          }}
+                        >
+                          {cell !== 0 ? cell : ''}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>
+)}
+
+<div className="performance-tip">
+  {getPerformanceTip()}
+</div>
+        
       <div className="instructions">
         <p>Use arrow keys to move tiles. Join the numbers to get to 2048!</p>
         {aiPlaying && <p>AI is playing with Expectimax algorithm (depth: {aiDepth})</p>}
