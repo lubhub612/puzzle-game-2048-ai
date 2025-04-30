@@ -1404,6 +1404,111 @@ button:hover {
   color: white;
 }
 
+.style-feedback {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 12px 15px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+  animation: slideIn 0.3s ease-out;
+}
+
+.style-icon {
+  font-size: 24px;
+}
+
+.style-message {
+  font-size: 14px;
+  color: #333;
+  font-weight: 500;
+}
+
+.confidence-meter {
+  height: 3px;
+  background: #eee;
+  border-radius: 3px;
+  margin-top: 5px;
+  overflow: hidden;
+}
+
+.confidence-fill {
+  height: 100%;
+  background: #f67c5f;
+  transition: width 0.3s ease;
+}
+
+/* Style-specific colors */
+.style-feedback.strategist .style-icon { color: #4a6fa5; }
+.style-feedback.speed-runner .style-icon { color: #f2b179; }
+.style-feedback.risk-taker .style-icon { color: #f65e3b; }
+.style-feedback.builder .style-icon { color: #8f7a66; }
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@media (max-width: 600px) {
+  .style-feedback {
+    bottom: 10px;
+    right: 10px;
+    left: 10px;
+    justify-content: center;
+  }
+}
+
+.player-stats-panel {
+  background: rgba(187, 173, 160, 0.8);
+  border-radius: 8px;
+  padding: 15px;
+  margin-top: 20px;
+  color: #fff;
+  font-family: Arial, sans-serif;
+}
+
+.player-stats-panel h3 {
+  margin-top: 0;
+  color: #f2b179;
+  border-bottom: 1px solid #f2b179;
+  padding-bottom: 8px;
+}
+
+.stats-section {
+  margin-bottom: 15px;
+}
+
+.stats-section h4 {
+  margin: 10px 0 5px;
+  color: #eee4da;
+}
+
+.stat-item {
+  display: flex;
+  justify-content: space-between;
+  margin: 5px 0;
+  font-size: 14px;
+}
+
+.stat-label {
+  font-weight: bold;
+  color: #eee4da;
+}
+
+.stat-value {
+  color: #fff;
+}
+
+.highlight {
+  color: #f2b179;
+  font-weight: bold;
+}
+
 /* className={`grid-cell ${
             showHints && hintDirection 
               ? `hint-${hintDirection.toLowerCase()}` 

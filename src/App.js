@@ -63,6 +63,25 @@ function App() {
   const [tileAnimations, setTileAnimations] = useState({});
   const [showHistory, setShowHistory] = useState(false);
   const [showStatusIndicator, setShowStatusIndicator] = useState(false);
+  const [playerStyle, setPlayerStyle] = useState({
+    type: null, // 'builder', 'risk-taker', 'strategist', 'speed-runner'
+    confidence: 0, // 0-100 how confident we are in the classification
+    stats: {
+      mergeEfficiency: 0, // percentage of possible merges executed
+      cornerFocus: 0, // how often player keeps high tiles in corners
+      moveSpeed: 0, // average time between moves
+      riskMoves: 0 // percentage of risky moves attempted
+    }
+  });
+  const [gameState, setGameState] = useState({
+    merges: 0,
+    riskyMoves: 0,
+    totalMoves: 0,
+    highestTilePosition: { row: 0, col: 0 },
+    lastMoveTime: null,
+  });
+ const[mergeCount, setMergeCount] = useState(0);
+  
   const moveCountRef = useRef(0);
   const moveSound = useRef(null);
   const mergeSound = useRef(null);
@@ -242,6 +261,7 @@ function App() {
     const newGrid = grid.map(row => [...row]);
     let moved = false;
     let scoreIncrease = 0;
+    let totalMergeCount = 0;
     let newScore = score;
     // Process movement based on direction
    /* switch (direction) {
@@ -311,6 +331,65 @@ function App() {
       default:
         break;
     } */
+       /* switch (direction) {
+          case DIRECTIONS.LEFT:
+            for (let i = 0; i < GRID_SIZE; i++) {
+              const { row, changed, score, mergeCount } = processRow(newGrid[i]);
+              newGrid[i] = row;
+              moved = moved || changed;
+              scoreIncrease += score;
+              totalMergeCount += mergeCount; // Accumulate merges
+            }
+            break;
+            case DIRECTIONS.RIGHT:
+             for (let i = 0; i < GRID_SIZE; i++) {
+                 const reversedRow = [...newGrid[i]].reverse();
+                 const { row, changed, score, mergeCount } = processRow(reversedRow);
+                 newGrid[i] = row.reverse();
+                 moved = moved || changed;
+                 scoreIncrease += score;
+                 totalMergeCount += mergeCount;
+              }
+            break;
+            case DIRECTIONS.UP:
+        for (let j = 0; j < GRID_SIZE; j++) {
+          const column = [];
+         for (let i = 0; i < GRID_SIZE; i++) {
+           column.push(newGrid[i][j]);
+         }
+         const { row, changed, score, mergeCount } = processRow(column);
+              if (changed) {
+                for (let i = 0; i < GRID_SIZE; i++) {
+                     newGrid[i][j] = row[i];
+                }
+                moved = true;
+                scoreIncrease += score;
+                totalMergeCount += mergeCount;
+             }
+          }
+         break;
+         case DIRECTIONS.DOWN:
+  for (let j = 0; j < GRID_SIZE; j++) {
+    const column = [];
+    for (let i = GRID_SIZE - 1; i >= 0; i--) {
+      column.push(newGrid[i][j]);
+    }
+    const { row, changed, score, mergeCount } = processRow(column);
+    if (changed) {
+      const updatedCol = row.reverse();
+      for (let i = 0; i < GRID_SIZE; i++) {
+        newGrid[i][j] = updatedCol[i];
+      }
+      moved = true;
+      scoreIncrease += score;
+      totalMergeCount += mergeCount;
+      
+    }
+  }
+  break;
+  default:
+    break;
+        } */
 
     // Process the grid based on direction
     const processCell = (row, col) => {
@@ -338,7 +417,6 @@ function App() {
           newGrid[nextRow][nextCol] = currentValue;
           newGrid[row][col] = 0;
           moved = true;
-          
           // Add move animation
           newAnimations[`${nextRow}-${nextCol}`] = {
             type: 'move',
@@ -357,6 +435,7 @@ function App() {
           newGrid[row][col] = 0;
           newScore += newGrid[nextRow][nextCol];
           moved = true;
+          totalMergeCount +=1; 
           mergedTiles.add(`${nextRow}-${nextCol}`);
           
           // Add merge animation
@@ -412,13 +491,21 @@ function App() {
     if (moved) {
       playSound(moveSound);
       setTileAnimations(newAnimations);
+      /*setGameState(prev => ({
+        ...prev,
+        merges: prev.merges + totalMergeCount,
+        totalMoves: prev.totalMoves + 1,
+        lastMoveTime: Date.now(),
+        riskyMoves: prev.riskyMoves + (isRiskyMove(grid, direction) ? 1 : 0),
+        highestTilePosition: getHighestTilePosition(newGrid),
+      }));  */
       setTimeout(() => {
         addRandomTile(newGrid);
-      //const newScore = score + scoreIncrease;
+     // const newScore = score + scoreIncrease;
       setScore(newScore); 
       setScoreUpdated(true);
       setGrid(newGrid);
-      checkGameOver(newGrid)
+      
       if (newScore > bestScore) {
         setBestScore(newScore);
         addToScoreHistory(newScore);
@@ -427,12 +514,36 @@ function App() {
       if (isNewBest) {
         playSound(bestScoreSound);      
       } 
-      if (!gameWon && checkWinCondition(newGrid)) {
-        setGameWon(true);
-        playSound(winSound);
-      }
     }, 100);
+
+    if (!gameWon && checkWinCondition(newGrid)) {
+      setGameWon(true);
+      playSound(winSound);
+    }
+    if (checkGameOver(newGrid)) {
+      setGameOver(true);
+    }
+   /* setPlayerStyle(prev => analyzePlayerStyle(prev, {
+      ...gameState,
+      merges: gameState.merges + totalMergeCount,
+      totalMoves: gameState.totalMoves + 1,
+      lastMoveTime: Date.now(),
+      riskyMoves: gameState.riskyMoves,
+      // other updated metrics
+    }));  */
+    setGameState(prev => {
+      const newState = {
+        ...prev,
+        merges: prev.merges + totalMergeCount,
+        totalMoves: prev.totalMoves + 1,
+        lastMoveTime: Date.now(),
+        riskyMoves: prev.riskyMoves + (isRiskyMove(grid, direction) ? 1 : 0),
+        highestTilePosition: getHighestTilePosition(newGrid)
+      };
       
+    setPlayerStyle(prev => analyzePlayerStyle(prev, newState, newGrid));
+      return newState;
+    });
 
       setTimeout(() => setScoreUpdated(false), 300);
       
@@ -444,7 +555,7 @@ function App() {
   
 
   // Process a single row/column (left movement logic)
-  function processRow(row) {
+ /* function processRow(row) {
     const newRow = row.filter(cell => cell !== 0);
     let score = 0;
     let changed = false;
@@ -469,8 +580,8 @@ function App() {
   
     return { row: mergedRow, changed, score };
   }
-
-  function processLine(line) {
+*/
+/*  function processLine(line) {
     // Filter out zeros
     let filtered = line.filter(cell => cell !== 0);
     let score = 0;
@@ -495,7 +606,101 @@ function App() {
     }
   
     return { processed, changed, score };
+  } */
+
+    /**
+ * Processes a single row/column during movement
+ * @param {number[]} line - The row or column to process
+ * @returns {object} An object containing:
+ *   - row: The processed line
+ *   - changed: Whether the line was modified
+ *   - score: Points earned from merges
+ *   - merges: Array of merge positions and values
+ *   - mergeCount: Total number of merges in this line
+ */
+function processRow(line) {
+  // Filter out empty tiles (0s)
+  const nonZeroTiles = line.filter(cell => cell !== 0);
+  const processedLine = [];
+  const merges = [];
+  let score = 0;
+  let changed = nonZeroTiles.length !== line.length; // Changed if we removed zeros
+  let mergeCount = 0; // Initialize merge counter
+
+  // Process tiles from left to right (for LEFT direction)
+  for (let i = 0; i < nonZeroTiles.length; i++) {
+    // Check if current tile can merge with next tile
+    if (i < nonZeroTiles.length - 1 && nonZeroTiles[i] === nonZeroTiles[i + 1]) {
+      const mergedValue = nonZeroTiles[i] * 2;
+      processedLine.push(mergedValue);
+      score += mergedValue;
+      mergeCount++; // Increment merge counter
+      
+      // Record merge information
+      merges.push({
+        value: mergedValue,
+        index: processedLine.length - 1 // Position in the new line
+      });
+      
+      i++; // Skip the next tile since we merged it
+      changed = true;
+    } else {
+      // No merge, just move the tile
+      processedLine.push(nonZeroTiles[i]);
+    }
   }
+
+  // Fill the rest of the line with empty tiles (0s)
+  while (processedLine.length < line.length) {
+    processedLine.push(0);
+  }
+
+  return {
+    row: processedLine,
+    changed,
+    score,
+    merges,
+    mergeCount // Return the merge count
+  };
+}
+
+    function processLine(line) {
+      const nonZero = line.filter(cell => cell !== 0);
+      const newLine = [];
+      const merges = [];
+      let score = 0;
+      let changed = nonZero.length !== line.length;
+      let mergeCount = 0; // Initialize merge counter
+    
+      for (let i = 0; i < nonZero.length; i++) {
+        if (i < nonZero.length - 1 && nonZero[i] === nonZero[i + 1]) {
+          newLine.push(nonZero[i] * 2);
+          score += nonZero[i] * 2;
+          mergeCount++; // Increment for each merge
+          merges.push({
+            value: nonZero[i] * 2,
+            index: newLine.length - 1
+          });
+          i++; // Skip next element
+          changed = true;
+        } else {
+          newLine.push(nonZero[i]);
+        }
+      }
+    
+      while (newLine.length < line.length) {
+        newLine.push(0);
+      }
+    
+      return { 
+        row: newLine, 
+        changed, 
+        score,
+        merges,
+        mergeCount // Return the count
+      };
+    }
+
   // ================== Expectimax AI Implementation ==================
 
   // Evaluate the grid state using multiple heuristics
@@ -1481,6 +1686,54 @@ function addTileAtPosition(grid, emptyCells, value) {
     localStorage.setItem('scoreHistory', JSON.stringify(newHistory));
   };
 
+  function analyzePlayerStyle(prevStyle, gameState, currentGrid) {
+    const newStats = { ...prevStyle.stats };
+    
+    // Calculate merge efficiency (executed merges vs possible merges)
+    const possibleMerges = countPossibleMerges(currentGrid);
+    newStats.mergeEfficiency = ((gameState.merges / Math.max(1, possibleMerges)) * 100);
+    
+    // Calculate corner focus
+    newStats.cornerFocus = calculateCornerFocus(currentGrid, gameState.highestTilePosition);
+    
+    // Update move speed (milliseconds between moves)
+    if (gameState.lastMoveTime) {
+      const timeSinceLastMove = Date.now() - gameState.lastMoveTime;
+      newStats.moveSpeed = (newStats.moveSpeed * 0.8) + (timeSinceLastMove * 0.2);
+    }
+    
+    // Calculate risk moves (percentage of moves that could trap high tiles)
+    newStats.riskMoves = ((gameState.riskyMoves / Math.max(1, gameState.totalMoves)) * 100);
+    
+    // Determine player type based on stats
+    const newType = determinePlayerType(newStats);
+    const newConfidence = enhancedCalculateConfidence(newStats, newType);
+    
+    return {
+      type: newConfidence > 50 ? newType : null,
+      confidence: newConfidence,
+      stats: newStats
+    };
+  }
+  
+  function determinePlayerType(stats) {
+    if (stats.mergeEfficiency > 75 && stats.cornerFocus > 70) {
+      return 'strategist';
+    }
+    if (stats.moveSpeed < 1000 && stats.riskMoves > 40) {
+      return 'speed-runner';
+    }
+    if (stats.riskMoves > 30 && stats.mergeEfficiency < 60) {
+      return 'risk-taker';
+    }
+    if (stats.mergeEfficiency > 65 && stats.cornerFocus > 50) {
+      return 'builder';
+    }
+    return null;
+  }
+
+
+
   useEffect(() => {
     if (!aiPlaying) return;
   
@@ -1668,8 +1921,8 @@ const clearHistory = () => {
     if (!animation) return {};
     
     // Calculate positions based on grid spacing
-    const cellSize = 30; // percentage including gap
-    const gapSize = 8;   // percentage
+    const cellSize = 25; // percentage including gap
+    const gapSize = 4;   // percentage
     
     switch (animation.type) {
       case 'move':
@@ -1801,7 +2054,334 @@ const clearHistory = () => {
     onTouchEnd
   } : {};
 
+  function getStyleFeedback(playerStyle) {
+    if (!playerStyle.type || playerStyle.confidence < 60) return null;
+    
+    const messages = {
+      'strategist': "Great strategy! You're methodically building large tiles.",
+      'speed-runner': "Quick moves! You're playing at an impressive pace.",
+      'risk-taker': "Bold moves! You're not afraid to take risks.",
+      'builder': "Solid building! You're carefully constructing your board."
+    };
+    
+    return (
+      <div className={`style-feedback ${playerStyle.type}`}>
+        <div className="style-icon">
+          {{
+            'strategist': '🧠',
+            'speed-runner': '⚡',
+            'risk-taker': '🎲',
+            'builder': '🏗️'
+          }[playerStyle.type]}
+        </div>
+        <div className="style-message">
+          {messages[playerStyle.type]}
+          <div className="confidence-meter">
+            <div 
+              className="confidence-fill" 
+              style={{ width: `${playerStyle.confidence}%` }}
+            ></div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
+  function countPossibleMerges(grid) {
+    let count = 0;
+    for (let i = 0; i < GRID_SIZE; i++) {
+      for (let j = 0; j < GRID_SIZE; j++) {
+        if (grid[i][j] === 0) continue;
+        // Check right neighbor
+        if (j < GRID_SIZE - 1 && grid[i][j] === grid[i][j + 1]) count++;
+        // Check bottom neighbor
+        if (i < GRID_SIZE - 1 && grid[i][j] === grid[i + 1][j]) count++;
+      }
+    }
+    return count;
+  }
+  
+  function calculateCornerFocus(grid, highestPos) {
+    const corners = [
+      {row: 0, col: 0},
+      {row: 0, col: GRID_SIZE - 1},
+      {row: GRID_SIZE - 1, col: 0},
+      {row: GRID_SIZE - 1, col: GRID_SIZE - 1}
+    ];
+    
+    const isInCorner = corners.some(corner => 
+      corner.row === highestPos.row && corner.col === highestPos.col
+    );
+    
+    return isInCorner ? 100 : 0;
+  }
+  
+  function isRiskyMove(grid, direction) {
+    // Create test grid
+    const testGrid = JSON.parse(JSON.stringify(grid));
+    
+    // Simulate the move
+    if (!simulateMove(testGrid, direction)) return false;
+    
+    // Find highest value tile
+    const highValue = Math.max(...grid.flat());
+    if (highValue < 64) return false; // Only consider risk for high-value tiles
+    
+    // Check if highest value tile might get trapped
+    const originalPos = getHighestTilePosition(grid);
+    const newPos = getHighestTilePosition(testGrid);
+    
+    // If highest tile didn't move, it's risky
+    if (originalPos.row === newPos.row && originalPos.col === newPos.col) {
+      return true;
+    }
+    
+    // Check if highest tile is now surrounded
+    const neighbors = [
+      {row: newPos.row - 1, col: newPos.col}, // up
+      {row: newPos.row + 1, col: newPos.col}, // down
+      {row: newPos.row, col: newPos.col - 1}, // left
+      {row: newPos.row, col: newPos.col + 1}  // right
+    ].filter(pos => 
+      pos.row >= 0 && pos.row < GRID_SIZE && 
+      pos.col >= 0 && pos.col < GRID_SIZE
+    );
+    
+    return neighbors.every(neighbor => 
+      testGrid[neighbor.row][neighbor.col] !== 0 &&
+      testGrid[neighbor.row][neighbor.col] !== highValue
+    );
+  }
+
+  function getHighestTilePosition(grid) {
+    let maxValue = -Infinity;
+    let position = { row: 0, col: 0 };
+  
+    // Scan the entire grid to find highest value tile
+    for (let row = 0; row < GRID_SIZE; row++) {
+      for (let col = 0; col < GRID_SIZE; col++) {
+        const tileValue = grid[row][col];
+        if (tileValue > maxValue) {
+          maxValue = tileValue;
+          position = { row, col };
+        }
+      }
+    }
+  
+    return position;
+  }
+
+  function calculateConfidence(stats, playerType) {
+    // Base confidence scores for each player type
+    const typeThresholds = {
+      'strategist': {
+        mergeEfficiency: 75,
+        cornerFocus: 70,
+        moveSpeed: 2000, // slower moves
+        riskMoves: 20
+      },
+      'speed-runner': {
+        mergeEfficiency: 50,
+        cornerFocus: 40,
+        moveSpeed: 800,  // very fast moves
+        riskMoves: 40
+      },
+      'risk-taker': {
+        mergeEfficiency: 55,
+        cornerFocus: 30,
+        moveSpeed: 1500,
+        riskMoves: 35
+      },
+      'builder': {
+        mergeEfficiency: 65,
+        cornerFocus: 50,
+        moveSpeed: 1800,
+        riskMoves: 25
+      }
+    };
+  
+    if (!playerType) return 0;
+  
+    const thresholds = typeThresholds[playerType];
+    let confidence = 0;
+  
+    // Calculate confidence for each metric
+    const mergeEffConfidence = Math.min(100, (stats.mergeEfficiency / thresholds.mergeEfficiency) * 100);
+    const cornerConfidence = Math.min(100, (stats.cornerFocus / thresholds.cornerFocus) * 100);
+    const speedConfidence = playerType === 'speed-runner' 
+      ? Math.min(100, (thresholds.moveSpeed / Math.max(1, stats.moveSpeed)) * 100)
+      : Math.min(100, (stats.moveSpeed / Math.max(1, thresholds.moveSpeed)) * 100);
+    const riskConfidence = Math.min(100, (stats.riskMoves / thresholds.riskMoves) * 100);
+  
+    // Weighted average based on importance for each type
+    switch (playerType) {
+      case 'strategist':
+        confidence = (mergeEffConfidence * 0.4) + (cornerConfidence * 0.4) + (speedConfidence * 0.1) + (riskConfidence * 0.1);
+        break;
+      case 'speed-runner':
+        confidence = (mergeEffConfidence * 0.2) + (cornerConfidence * 0.1) + (speedConfidence * 0.5) + (riskConfidence * 0.2);
+        break;
+      case 'risk-taker':
+        confidence = (mergeEffConfidence * 0.2) + (cornerConfidence * 0.1) + (speedConfidence * 0.2) + (riskConfidence * 0.5);
+        break;
+      case 'builder':
+        confidence = (mergeEffConfidence * 0.5) + (cornerConfidence * 0.3) + (speedConfidence * 0.1) + (riskConfidence * 0.1);
+        break;
+      default:
+        confidence = 0;
+    }
+  
+    // Apply non-linear scaling to make mid-range confidence values more distinct
+    return Math.min(100, Math.floor(Math.pow(confidence / 100, 0.8) * 100));
+  }
+
+  function getSecondHighestTilePosition(grid) {
+    let max = -Infinity;
+    let secondMax = -Infinity;
+    let maxPos = { row: 0, col: 0 };
+    let secondMaxPos = { row: 0, col: 0 };
+  
+    for (let row = 0; row < GRID_SIZE; row++) {
+      for (let col = 0; col < GRID_SIZE; col++) {
+        const val = grid[row][col];
+        if (val > max) {
+          secondMax = max;
+          secondMaxPos = maxPos;
+          max = val;
+          maxPos = { row, col };
+        } else if (val > secondMax && val < max) {
+          secondMax = val;
+          secondMaxPos = { row, col };
+        }
+      }
+    }
+  
+    return secondMaxPos;
+  }
+  
+  function calculateTileClustering(grid) {
+    // Measures how clustered high-value tiles are
+    let clusterScore = 0;
+    const highValue = Math.max(...grid.flat()) / 2;
+    let highTiles = [];
+    
+    // Find all high-value tiles
+    for (let row = 0; row < GRID_SIZE; row++) {
+      for (let col = 0; col < GRID_SIZE; col++) {
+        if (grid[row][col] >= highValue) {
+          highTiles.push({ row, col });
+        }
+      }
+    }
+  
+    // Calculate average distance between high tiles
+    if (highTiles.length > 1) {
+      let totalDistance = 0;
+      for (let i = 0; i < highTiles.length; i++) {
+        for (let j = i + 1; j < highTiles.length; j++) {
+          const dx = highTiles[i].row - highTiles[j].row;
+          const dy = highTiles[i].col - highTiles[j].col;
+          totalDistance += Math.sqrt(dx * dx + dy * dy);
+        }
+      }
+      clusterScore = 100 - (totalDistance / (highTiles.length * (highTiles.length - 1) / 2)) * 20;
+    }
+  
+    return Math.max(0, Math.min(100, clusterScore));
+  }
+
+  function enhancedCalculateConfidence(stats, playerType) {
+    const baseConfidence = calculateConfidence(stats, playerType);
+    
+    // Additional factors that boost confidence
+    let boost = 0;
+    
+    // High merge efficiency strongly indicates strategist/builder
+    if ((playerType === 'strategist' || playerType === 'builder') && stats.mergeEfficiency > 80) {
+      boost += 10;
+    }
+    
+    // Very fast moves strongly indicate speed-runner
+    if (playerType === 'speed-runner' && stats.moveSpeed < 500) {
+      boost += 15;
+    }
+    
+    // Extreme risk-taking strongly indicates risk-taker
+    if (playerType === 'risk-taker' && stats.riskMoves > 50) {
+      boost += 12;
+    }
+    
+    // Corner focus boosts strategist confidence
+    if (playerType === 'strategist' && stats.cornerFocus > 85) {
+      boost += 8;
+    }
+    
+    return Math.min(100, baseConfidence + boost);
+  }
+
+  function PlayerStatsPanel({ playerStyle, gameState }) {
+    return (
+      <div className="player-stats-panel">
+        <h3>Player Analytics</h3>
+        
+        <div className="stats-section">
+          <h4>Game State</h4>
+          <div className="stat-item">
+            <span className="stat-label">Total Moves:</span>
+            <span className="stat-value">{gameState.totalMoves}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">Successful Merges:</span>
+            <span className="stat-value">{gameState.merges}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">Risky Moves:</span>
+            <span className="stat-value">{gameState.riskyMoves}</span>
+          </div>
+          <div className="stat-item">
+            <span className="stat-label">Highest Tile:</span>
+            <span className="stat-value">
+              {gameState.highestTileValue || 'N/A'} at ({gameState.highestTilePosition.row}, {gameState.highestTilePosition.col})
+            </span>
+          </div>
+        </div>
+  
+        <div className="stats-section">
+          <h4>Playing Style</h4>
+          {playerStyle.type ? (
+            <>
+              <div className="stat-item">
+                <span className="stat-label">Detected Style:</span>
+                <span className="stat-value highlight">
+                  {playerStyle.type} ({playerStyle.confidence}% confidence)
+                </span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">Merge Efficiency:</span>
+                <span className="stat-value">{playerStyle.stats.mergeEfficiency.toFixed(1)}%</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">Corner Focus:</span>
+                <span className="stat-value">{playerStyle.stats.cornerFocus.toFixed(1)}%</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">Move Speed:</span>
+                <span className="stat-value">{playerStyle.stats.moveSpeed.toFixed(0)}ms</span>
+              </div>
+              <div className="stat-item">
+                <span className="stat-label">Risk Taking:</span>
+                <span className="stat-value">{playerStyle.stats.riskMoves.toFixed(1)}%</span>
+              </div>
+            </>
+          ) : (
+            <div className="stat-item">
+              <span className="stat-value">Still analyzing your play style...</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app">
@@ -1909,7 +2489,7 @@ const clearHistory = () => {
         <div
         key={`${rowIndex}-${colIndex}`}
         data-value={cell}
-        className={`tile ${
+        className={`grid-cell ${
           showHints && hintDirection 
             ? `hint-${hintDirection.toLowerCase()}` 
             : ''
@@ -2012,7 +2592,8 @@ const clearHistory = () => {
           </button>
         </div>
       </div>
-
+      {PlayerStatsPanel({ playerStyle, gameState })}
+      {getStyleFeedback(playerStyle)}
       <div className="hint-controls">
   <button 
     onClick={() => {
