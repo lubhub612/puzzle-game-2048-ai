@@ -62,7 +62,7 @@ function App() {
 });
   const [tileAnimations, setTileAnimations] = useState({});
   const [showHistory, setShowHistory] = useState(false);
-
+  const [showStatusIndicator, setShowStatusIndicator] = useState(false);
   const moveCountRef = useRef(0);
   const moveSound = useRef(null);
   const mergeSound = useRef(null);
@@ -108,16 +108,17 @@ function App() {
     }
   }, []);
 
+
   // Initialize the grid with two random tiles
   function initializeGrid() {
     const newGrid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(0));
-    addRandomTile(newGrid);
-    addRandomTile(newGrid);
+    addRandomTile(newGrid, true);
+    addRandomTile(newGrid, true);
     return newGrid;
   }
 
   // Add a random tile (2 or 4) to an empty cell
-  function addRandomTile(grid) {
+  function addRandomTile(grid, initial = false) {
     const emptyCells = [];
     for (let i = 0; i < GRID_SIZE; i++) {
       for (let j = 0; j < GRID_SIZE; j++) {
@@ -130,6 +131,17 @@ function App() {
     if (emptyCells.length > 0) {
       const { row, col } = emptyCells[Math.floor(Math.random() * emptyCells.length)];
       grid[row][col] = Math.random() < 0.9 ? 2 : 4;
+
+      if (!initial) {
+        playSound(appearSound);
+        // Add appear animation for new tile
+        setTileAnimations(prev => ({
+          ...prev,
+          [`${row}-${col}`]: { type: 'appear', key: Date.now() }
+        }));
+      }
+
+      //playSound(appearSound);
     }
   }
 
@@ -141,13 +153,14 @@ function App() {
     setGameOver(false);
     setKeepPlaying(false);
     setLastDirection(null);
+    setTileAnimations({});
     setScoreHistory(prev => [...prev, {
       score: 0,
       date: new Date().toISOString(),
       status: 'started'
     }]);
-    setTileAnimations({});
   }, []);
+
 
   function checkWinCondition(grid) {
     // Check if any tile has reached 2048
@@ -206,6 +219,7 @@ function App() {
     }
 
     setGameOver(true);
+    setShowStatusIndicator(true);
     addToScoreHistory(score);
     playSound(loseSound);
     return true;
@@ -220,14 +234,17 @@ function App() {
     
     // Remove highlight after animation completes
     setTimeout(() => setDirectionHighlight(false), 200);
-    
+
+    const newAnimations = {};
+    const mergedTiles = new Set();
+
     // Create a deep copy of the grid
     const newGrid = grid.map(row => [...row]);
     let moved = false;
     let scoreIncrease = 0;
-  
+    let newScore = score;
     // Process movement based on direction
-    switch (direction) {
+   /* switch (direction) {
       case DIRECTIONS.UP:
         for (let col = 0; col < GRID_SIZE; col++) {
           const column = [];
@@ -293,13 +310,111 @@ function App() {
   
       default:
         break;
+    } */
+
+    // Process the grid based on direction
+    const processCell = (row, col) => {
+      let currentValue = newGrid[row][col];
+      if (currentValue === 0) return;
+
+      let newRow = row;
+      let newCol = col;
+      let nextRow = row;
+      let nextCol = col;
+
+      if (direction === 'up') {
+        nextRow = row - 1;
+      } else if (direction === 'down') {
+        nextRow = row + 1;
+      } else if (direction === 'left') {
+        nextCol = col - 1;
+      } else if (direction === 'right') {
+        nextCol = col + 1;
+      }
+
+      if (nextRow >= 0 && nextRow < 4 && nextCol >= 0 && nextCol < 4) {
+        if (newGrid[nextRow][nextCol] === 0) {
+          // Move to empty cell
+          newGrid[nextRow][nextCol] = currentValue;
+          newGrid[row][col] = 0;
+          moved = true;
+          
+          // Add move animation
+          newAnimations[`${nextRow}-${nextCol}`] = {
+            type: 'move',
+            fromRow: row,
+            fromCol: col,
+            key: Date.now()
+          };
+          
+          processCell(nextRow, nextCol);
+        } else if (
+          newGrid[nextRow][nextCol] === currentValue &&
+          !mergedTiles.has(`${nextRow}-${nextCol}`)
+        ) {
+          // Merge with same value
+          newGrid[nextRow][nextCol] *= 2;
+          newGrid[row][col] = 0;
+          newScore += newGrid[nextRow][nextCol];
+          moved = true;
+          mergedTiles.add(`${nextRow}-${nextCol}`);
+          
+          // Add merge animation
+          newAnimations[`${nextRow}-${nextCol}`] = {
+            type: 'merge',
+            fromRow: row,
+            fromCol: col,
+            key: Date.now()
+          };
+          
+          // Add pop animation for merged tile
+          setTimeout(() => {
+            setTileAnimations(prev => ({
+              ...prev,
+              [`${nextRow}-${nextCol}`]: { type: 'pop', key: Date.now() }
+            }));
+          }, 100);
+
+          if (newGrid[nextRow][nextCol] === 2048 && !gameWon) {
+            setGameWon(true);
+          }
+        }
+      }
+    };
+
+    // Process cells in the correct order based on direction
+    if (direction === 'up') {
+      for (let i = 1; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          processCell(i, j);
+        }
+      }
+    } else if (direction === 'down') {
+      for (let i = 2; i >= 0; i--) {
+        for (let j = 0; j < 4; j++) {
+          processCell(i, j);
+        }
+      }
+    } else if (direction === 'left') {
+      for (let j = 1; j < 4; j++) {
+        for (let i = 0; i < 4; i++) {
+          processCell(i, j);
+        }
+      }
+    } else if (direction === 'right') {
+      for (let j = 2; j >= 0; j--) {
+        for (let i = 0; i < 4; i++) {
+          processCell(i, j);
+        }
+      }
     }
   
     if (moved) {
       playSound(moveSound);
+      setTileAnimations(newAnimations);
       setTimeout(() => {
         addRandomTile(newGrid);
-      const newScore = score + scoreIncrease;
+      //const newScore = score + scoreIncrease;
       setScore(newScore); 
       setScoreUpdated(true);
       setGrid(newGrid);
@@ -325,6 +440,8 @@ function App() {
   
     return moved;
   }, [grid, score, gameOver, keepPlaying, gameWon]);
+
+  
 
   // Process a single row/column (left movement logic)
   function processRow(row) {
@@ -861,6 +978,8 @@ function calculateTrappedPenalty(grid) {
       // If we get here, game is really over
       console.log("No possible moves detected");
       setGameOver(true);
+      
+      
       return false;
       
     } catch (error) {
@@ -1459,22 +1578,46 @@ const clearHistory = () => {
   // Get tile color based on value
   const getTileColor = (value) => {
     const colors = {
-      0: '#cdc1b4',
-      2: '#eee4da',
-      4: '#ede0c8',
-      8: '#f2b179',
-      16: '#f59563',
-      32: '#f67c5f',
-      64: '#f65e3b',
-      128: '#edcf72',
-      256: '#edcc61',
-      512: '#edc850',
-      1024: '#edc53f',
-      2048: '#edc22e',
-      4096: '#3c3a32',
-      8192: '#3c3a32'
+      0: 'var(--tile-0)',
+      2: 'var(--tile-2)',
+      4: 'var(--tile-4)',
+      8: 'var(--tile-8)',
+      16: 'var(--tile-16)',
+      32: 'var(--tile-32)',
+      64: 'var(--tile-64)',
+      128: 'var(--tile-128)',
+      256: 'var(--tile-256)',
+      512: 'var(--tile-512)',
+      1024: 'var(--tile-1024)',
+      2048: 'var(--tile-2048)',
+      4096: 'var(--tile-super)',
+      8192: 'var(--tile-super)'
     };
-    return colors[value] || '#3c3a32';
+    return colors[value] || 'var(--tile-super)';
+  };
+  
+  const getTextColor = (value) => {
+    return value > 4 ? 'var(--text-light)' : 'var(--text-dark)';
+  };
+
+  const getFontSize = (value) => {
+    const sizes = {
+      0: '45px',
+      2: '45px',
+      4: '45px',
+      8: '45px',
+      16: '45px',
+      32: '45px',
+      64: '45px',
+      128: '40px',
+      256: '40px',
+      512: '40px',
+      1024: '35px',
+      2048: '35px',
+      4096: '30px',
+      8192: '30px'
+    };
+    return sizes[value] || '30px';
   };
 
   const getDirectionHighlightStyle = () => {
@@ -1520,6 +1663,53 @@ const clearHistory = () => {
     }
   };
 
+  const getTileAnimation = (row, col) => {
+    const animation = tileAnimations[`${row}-${col}`];
+    if (!animation) return {};
+    
+    // Calculate positions based on grid spacing
+    const cellSize = 30; // percentage including gap
+    const gapSize = 8;   // percentage
+    
+    switch (animation.type) {
+      case 'move':
+        const fromRow = animation.fromRow;
+        const fromCol = animation.fromCol;
+        
+        // Calculate translation distances
+        const translateX = (col - fromCol) * (cellSize + gapSize) + '%';
+        const translateY = (row - fromRow) * (cellSize + gapSize) + '%';
+        
+        return {
+          transform: `translate(${translateX}, ${translateY})`,
+          transition: 'transform 0.1s ease-out',
+          zIndex: 2, // Higher than default tiles
+        };
+  
+      case 'merge':
+        return {
+          transform: 'scale(1.1)',
+          transition: 'transform 0.08s ease-out',
+          zIndex: 3, // Highest priority
+        };
+  
+      case 'pop':
+        return {
+          animation: 'pop 0.15s ease-out',
+          zIndex: 3,
+        };
+  
+      case 'appear':
+        return {
+          animation: 'appear 0.15s ease-out',
+          zIndex: 1,
+        };
+  
+      default:
+        return {};
+    }
+  };
+
   const ScoreHistory = ({ history }) => {
     return (
       <div className="score-history">
@@ -1546,6 +1736,72 @@ const clearHistory = () => {
       </div>
     );
   };
+
+  const handleSwipe = (direction) => {
+      moveTiles(direction);
+    };
+  
+    const useSwipe = (onSwipe) => {
+      const touchStart = useRef({ x: null, y: null });
+      const touchEnd = useRef({ x: null, y: null });
+    
+      // Minimum swipe distance (in pixels) to trigger a move
+      const minSwipeDistance = 50;
+    
+      const onTouchStart = (e) => {
+        touchEnd.current = { x: null, y: null };
+        touchStart.current = {
+          x: e.targetTouches[0].clientX,
+          y: e.targetTouches[0].clientY
+        };
+      };
+    
+      const onTouchMove = (e) => {
+        touchEnd.current = {
+          x: e.targetTouches[0].clientX,
+          y: e.targetTouches[0].clientY
+        };
+      };
+    
+      const onTouchEnd = () => {
+        if (!touchStart.current.x || !touchEnd.current.x) return;
+        
+        const xDistance = touchStart.current.x - touchEnd.current.x;
+        const yDistance = touchStart.current.y - touchEnd.current.y;
+        
+        // Check if swipe is more horizontal or vertical
+        if (Math.abs(xDistance) > Math.abs(yDistance)) {
+          // Horizontal swipe
+          if (xDistance > minSwipeDistance) {
+            onSwipe('left');
+          } else if (xDistance < -minSwipeDistance) {
+            onSwipe('right');
+          }
+        } else {
+          // Vertical swipe
+          if (yDistance > minSwipeDistance) {
+            onSwipe('up');
+          } else if (yDistance < -minSwipeDistance) {
+            onSwipe('down');
+          }
+        }
+      };
+    
+      return { onTouchStart, onTouchMove, onTouchEnd };
+    }; 
+  
+    const { onTouchStart, onTouchMove, onTouchEnd } = useSwipe(handleSwipe);
+    
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  
+  // Only add touch events if on mobile
+  const touchProps = isMobile ? {
+    onTouchStart,
+    onTouchMove,
+    onTouchEnd
+  } : {};
+
+
 
   return (
     <div className="app">
@@ -1643,25 +1899,28 @@ const clearHistory = () => {
 {aiThinking && <div className="ai-thinking">AI is thinking...</div>}
       </div>
       <div className="game-container"
-       tabIndex={0} // Make the div focusable
-       onKeyDown={(e) => e.preventDefault()}  // For debugging
-        >
+       //tabIndex={0} // Make the div focusable
+       //onKeyDown={(e) => e.preventDefault()}  // For debugging
+       {...touchProps} >
         <div className="grid">
   {grid.map((row, rowIndex) => (
     <div key={rowIndex} className="grid-row">
       {row.map((cell, colIndex) => (
         <div
-          key={colIndex}
-          className={`grid-cell ${
-            showHints && hintDirection 
-              ? `hint-${hintDirection.toLowerCase()}` 
-              : ''
-          }`}
+        key={`${rowIndex}-${colIndex}`}
+        data-value={cell}
+        className={`tile ${
+          showHints && hintDirection 
+            ? `hint-${hintDirection.toLowerCase()}` 
+            : ''
+        }`}
           style={{ 
             backgroundColor: getTileColor(cell),
-            color: cell > 4 ? '#f9f6f2' : '#776e65',
-            fontSize: cell < 100 ? '55px' : cell < 1000 ? '45px' : '35px',
-            position: 'relative' // Needed for hint arrows
+            color: getTextColor(cell),
+            fontSize: getFontSize(cell),
+            position: 'relative', 
+            visibility: cell === 0 ? 'hidden' : 'visible',// Needed for hint arrows
+            ...getTileAnimation(rowIndex, colIndex)
           }}
         >
           {cell !== 0 ? cell : ''}
@@ -1670,48 +1929,57 @@ const clearHistory = () => {
     </div>
   ))}
 </div>
-       
-{gameWon && !keepPlaying && (
-  <div className="win-modal">
-    <div className="win-content">
-      <h2>You Win!</h2>
-      <p>Congratulations! You reached 2048!</p>
-      <div className="win-buttons">
-        <button 
-          onClick={() => setKeepPlaying(true)}
-          className="keep-playing-button"
-        >
-          Keep Playing
-        </button>
-        <button 
-          onClick={resetGame}
-          className="new-game-button"
-        >
+{gameOver && (
+  <>
+  <div className="game-over-overlay">
+    <div className="game-over-content">
+      <h2>Game Over!</h2>
+      <p>Your score: {score}</p>
+      <p>Best score: {bestScore}</p>
+      <div className="game-over-buttons">
+        <button onClick={resetGame} className="new-game-button">
           New Game
         </button>
+        {gameWon && (
+          <button 
+            onClick={() => setKeepPlaying(true)} 
+            className="keep-playing-button"
+          >
+            Keep Playing
+          </button>
+        )}
       </div>
     </div>
   </div>
+  
+  </>
 )}
-
-        {gameOver && (
-          <div className="game-over">
-            <div>Game Over!</div>
-            <button onClick={resetGame}>Try Again</button>
-          </div>
-        )}
-
-<div className="game-status">
+    {showStatusIndicator && (
+  <div className="status-indicators">
   {gameWon && (
-    <div className="win-indicator">
-      <span>🏆 You Won! </span>
-      {keepPlaying && <span>(Continuing)</span>}
+    <div className={`win-indicator ${keepPlaying ? 'continued' : ''}`}>
+      <span className="icon">🏆</span>
+      <span className="text">
+        {keepPlaying ? 'You Won! (Continuing)' : 'You Won!'}
+      </span>
     </div>
   )}
   {gameOver && !gameWon && (
-    <div className="game-over-indicator">Game Over!</div>
+    <div className="game-over-indicator">
+      <span className="icon">💀</span>
+      <span className="text">Game Over!</span>
+    </div>
   )}
+   <button 
+      className="close-indicator"
+      onClick={() => setShowStatusIndicator(false)}
+    >
+      ×
+    </button>
 </div>
+)}
+
+
 {directionHighlight && (
           <div className="direction-highlight" style={getDirectionHighlightStyle()}></div>
         )}
@@ -1843,3 +2111,6 @@ const clearHistory = () => {
 }
 
 export default App;
+
+
+  
