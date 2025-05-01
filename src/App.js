@@ -29,6 +29,13 @@ const difficultySettings = {
   expert: { depth: 5, speed: 100, delay: 500 }
 };
 
+const badgeInfo = {
+  256: { title: "256 Expert", color: "#f2b179", icon: "🥉" },
+  512: { title: "512 Master", color: "#f59563", icon: "🥈" },
+  1024: { title: "1024 Champion", color: "#f67c5f", icon: "🏆" },
+  2048: { title: "2048 Legend", color: "#e74c3c", icon: "🌟" }
+};
+
 function App() {
   const [grid, setGrid] = useState(initializeGrid());
   const [score, setScore] = useState(0);
@@ -98,6 +105,49 @@ const [voiceControl, setVoiceControl] = useState({
   error : '',
   feedback: ''
 });
+const [streaks, setStreaks] = useState(() => {
+  const saved = localStorage.getItem('2048-streaks');
+  return saved ? JSON.parse(saved) : {
+    128: 0,
+    256: 0,
+    512: 0,
+    1024: 0,
+    2048: 0,
+    highest: 0
+  };
+});
+const [sessionStreaks, setSessionStreaks] = useState({
+  128: 0,
+  256: 0,
+  512: 0,
+  1024: 0,
+  2048: 0,
+  highest: 0
+});
+const [achievements, setAchievements] = useState(() => {
+  const saved = localStorage.getItem('2048-achievements');
+  return saved ? JSON.parse(saved) : {
+    256: { unlocked: false, showBadge: false, count: 0 },
+    512: { unlocked: false, showBadge: false, count: 0 },
+    1024: { unlocked: false, showBadge: false, count: 0 },
+    2048: { unlocked: false, showBadge: false, count: 0 }
+  };
+});
+const [sessionAchievements, setSessionAchievements] = useState({
+  256: { unlocked: false, showBadge: false },
+  512: { unlocked: false, showBadge: false },
+  1024: { unlocked: false, showBadge: false },
+  2048: { unlocked: false, showBadge: false }
+});
+const [gameTime, setGameTime] = useState(0);
+const [isTimerRunning, setIsTimerRunning] = useState(false);
+const [isGamePaused, setIsGamePaused] = useState(false);
+const [pausedState, setPausedState] = useState(null);
+const [bestTime, setBestTime] = useState(() => {
+  return localStorage.getItem('2048-best-time') || 0;
+});
+const [showResumePopup, setShowResumePopup] = useState(false);
+  
   
   const moveCountRef = useRef(0);
   const moveSound = useRef(null);
@@ -106,6 +156,9 @@ const [voiceControl, setVoiceControl] = useState({
   const winSound = useRef(null);
   const loseSound = useRef(null);
   const bestScoreSound = useRef(null);
+  const achievementSound = useRef(null);
+  const timerRef = useRef(null);
+  const pauseButtonRef = useRef(null);
 
   // Initialize sounds
   useEffect(() => {
@@ -115,9 +168,10 @@ const [voiceControl, setVoiceControl] = useState({
     winSound.current = new Audio('/sounds/win.mp3');
     loseSound.current = new Audio('/sounds/lose.mp3');
     bestScoreSound.current = new Audio('/sounds/best.mp3');
+    achievementSound.current = new Audio('/sounds/achievement.mp3');
     
     // Preload sounds
-    [moveSound, mergeSound, appearSound, winSound, loseSound, bestScoreSound].forEach(sound => {
+    [moveSound, mergeSound, appearSound, winSound, loseSound, bestScoreSound, achievementSound].forEach(sound => {
       sound.current.load();
       sound.current.volume = 0.3; // Set appropriate volume
     });
@@ -144,6 +198,46 @@ const [voiceControl, setVoiceControl] = useState({
     }
   }, []);
 
+  useEffect(() => {
+    const savedStreaks = localStorage.getItem('2048-streaks');
+    if (savedStreaks) {
+      setStreaks(JSON.parse(savedStreaks));
+    }
+  }, []);
+  
+  useEffect(() => {
+    localStorage.setItem('2048-streaks', JSON.stringify(streaks));
+  }, [streaks]);
+
+  useEffect(() => {
+const savedAchievements = localStorage.getItem('2048-achievements');
+if (savedAchievements) {
+  setAchievements(JSON.parse(savedAchievements));
+}
+  }, []);
+  
+  useEffect(() => {
+    localStorage.setItem('2048-achievements', JSON.stringify(achievements));
+  }, [achievements]);
+
+  useEffect(() => {
+    if (isTimerRunning) {
+      timerRef.current = setInterval(() => {
+        setGameTime(prevTime => prevTime + 1);
+      }, 1000);
+    } else {
+      clearInterval(timerRef.current);
+    }
+  
+    return () => clearInterval(timerRef.current);
+  }, [isTimerRunning]);
+
+  useEffect(() => {
+    if (gameOver && gameTime > bestTime) {
+      setBestTime(gameTime);
+      localStorage.setItem('2048-best-time', gameTime);
+    }
+  }, [gameOver, gameTime, bestTime]);
 
   // Initialize the grid with two random tiles
   function initializeGrid() {
@@ -195,6 +289,13 @@ const [voiceControl, setVoiceControl] = useState({
       date: new Date().toISOString(),
       status: 'started'
     }]);
+    setIsTimerRunning(true);
+  setGameTime(0);
+  setIsGamePaused(false);
+  setPausedState(null);
+  //clearInterval(timerRef.current);
+  resetSessionStreaks();
+  resetSessionAchievements();
   }, []);
 
 
@@ -259,7 +360,11 @@ const [voiceControl, setVoiceControl] = useState({
 
   // Move tiles in the specified direction
   const moveTiles = useCallback((direction) => {
+    if (isGamePaused) return false; 
     if (gameOver && !keepPlaying) return false;
+    if(!isTimerRunning){
+      setIsTimerRunning(true);
+    }
 
     setLastDirection(direction);
     setDirectionHighlight(true);
@@ -273,6 +378,8 @@ const [voiceControl, setVoiceControl] = useState({
     // Create a deep copy of the grid
     const newGrid = grid.map(row => [...row]);
     let moved = false;
+    const newStreaks = {...streaks};
+    let updated = false;
     let scoreIncrease = 0;
     let totalMergeCount = 0;
     let newScore = score;
@@ -470,6 +577,98 @@ const [voiceControl, setVoiceControl] = useState({
           if (newGrid[nextRow][nextCol] === TARGET_VALUE && !gameWon) {
             setGameWon(true);
           }
+          if (newGrid[nextRow][nextCol] === currentValue * 2) {
+            const mergedValue = newGrid[nextRow][nextCol];
+            
+            if ([128, 256, 512, 1024, 2048].includes(mergedValue)) {
+              setStreaks(prev => {
+                const newStreaks = {
+                  ...prev,
+                  [mergedValue]: prev[mergedValue] + 1,
+                  highest: Math.max(prev.highest, mergedValue)
+                };
+                localStorage.setItem('2048-streaks', JSON.stringify(newStreaks));
+                return newStreaks;
+              });
+              
+              setSessionStreaks(prev => ({
+                ...prev,
+                [mergedValue]: prev[mergedValue] + 1,
+                highest: Math.max(prev.highest, mergedValue)
+              }));
+
+              // Visual feedback for big milestones
+              if (mergedValue >= 512) {
+                setTileAnimations(prev => ({
+                  ...prev,
+                  [`${nextRow}-${nextCol}`]: { 
+                    type: 'celebrate', 
+                    key: Date.now(),
+                    value: mergedValue
+                  }
+                }));
+                
+              }
+    
+              // Add confetti for big achievements
+              
+
+              if ([256, 512, 1024, 2048].includes(mergedValue)) {
+                setAchievements(prev => {
+                  const wasUnlocked = prev[mergedValue].unlocked; // Defined here
+                  const newCount = prev[mergedValue].count + 1;   // Defined here
+                  const shouldShow = !wasUnlocked || newCount % 5 === 0;
+                  
+                  const newState = {
+                    ...prev,
+                    [mergedValue]: {
+                      unlocked: true,
+                      showBadge: shouldShow,
+                      count: newCount
+                    }
+                  };
+                  
+                  localStorage.setItem('2048-achievements', JSON.stringify(newState));
+                  setSessionAchievements(prev => {
+                    const wasUnlocked = prev[mergedValue].unlocked;
+                    const newCount = prev[mergedValue].count + 1;
+                    const shouldShow = !wasUnlocked || newCount % 5 === 0;
+                    
+                    return {
+                      ...prev,
+                      [mergedValue]: {
+                        unlocked: true,
+                        showBadge: shouldShow,
+                        count: newCount
+                      }
+                    };
+                  });
+                   // Show badge if needed (from either tracker)
+    const shouldShowBadge = 
+    (!achievements[mergedValue].unlocked && !sessionAchievements[mergedValue].unlocked) || 
+    (achievements[mergedValue].count + 1) % 5 === 0;
+
+                  if (shouldShowBadge) {
+                    setTimeout(() => {
+                      setAchievements(prev => ({
+                        ...prev,
+                        [mergedValue]: { ...prev[mergedValue], showBadge: false }
+                      }));
+                      setSessionAchievements(prev => ({
+                        ...prev,
+                        [mergedValue]: { ...prev[mergedValue], showBadge: false }
+                      }));
+                    }, 3000);
+                    
+                    playSound(achievementSound);
+                    announceMilestone(mergedValue);
+                  }
+                  
+                  return newState;
+                });
+            }
+            }
+          }
         }
       }
     };
@@ -530,6 +729,7 @@ const [voiceControl, setVoiceControl] = useState({
       setShowStatusIndicator(true);
       addToScoreHistory(score);
       playSound(loseSound);
+      setIsTimerRunning(false);
     }
 
     if (puzzleMode) {
@@ -561,6 +761,7 @@ const [voiceControl, setVoiceControl] = useState({
       }]
     }));
 
+    
       setTimeout(() => setScoreUpdated(false), 300);
       
     } else {
@@ -570,12 +771,15 @@ const [voiceControl, setVoiceControl] = useState({
         setShowStatusIndicator(true);
         addToScoreHistory(score);
         playSound(loseSound);
+        setIsTimerRunning(false);
+        setIsGamePaused(false);
+        setGameTime(0); 
         console.log("Game Over - No more moves available");
       }
     }
   
     return moved;
-  }, [grid, score, gameOver, keepPlaying, gameWon]);
+  }, [grid, score, gameOver, keepPlaying, gameWon, isGamePaused]);
 
   
 
@@ -1079,6 +1283,7 @@ function calculateTrappedPenalty(grid) {
   // Handle keyboard events
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (isGamePaused) return;
       // Only handle arrow keys
       if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
         return;
@@ -1119,7 +1324,7 @@ function calculateTrappedPenalty(grid) {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [moveTiles, aiPlaying, gameOver]); // Include all dependencies
+  }, [moveTiles, aiPlaying, gameOver, isGamePaused]); // Include all dependencies
 
 
   // AI move logic
@@ -3049,13 +3254,162 @@ const speak = (text) => {
   window.speechSynthesis.speak(utterance);
 };
 
+const announceMilestone = (value) => {
+  if ('speechSynthesis' in window) {
+    const utterance = new SpeechSynthesisUtterance(
+      `Congratulations! You reached ${value}!`
+    );
+    window.speechSynthesis.speak(utterance);
+  }
+};
 
+const AchievementBadge = ({ value, show, count, isSession = false }) => {
+  const badgeInfo = {
+    256: { title: "256 Expert", color: "#f2b179", icon: "🥉" },
+    512: { title: "512 Master", color: "#f59563", icon: "🥈" },
+    1024: { title: "1024 Champion", color: "#f67c5f", icon: "🏆" },
+    2048: { title: "2048 Legend", color: "#e74c3c", icon: "🌟" }
+  };
+
+  return (
+    <div className={`achievement-badge ${isSession ? 'session-badge' : ''}`}
+         style={{ 
+           borderLeftColor: badgeInfo[value].color,
+           display: show ? 'flex' : 'none'
+         }}>
+      <div className="badge-icon">{badgeInfo[value].icon}</div>
+      <div className="badge-content">
+        <div className="badge-title">
+          {badgeInfo[value].title} {isSession ? '(Session)' : ''}
+        </div>
+        <div className="badge-value">
+          Reached {value}! (×{count})
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Add reset function
+const resetAllStreaks = () => {
+  setStreaks({
+    128: 0,
+    256: 0,
+    512: 0,
+    1024: 0,
+    2048: 0,
+    highest: 0
+  });
+  localStorage.removeItem('2048-streaks');
+};
+
+const resetSessionStreaks = () => {
+  setSessionStreaks({
+    128: 0,
+    256: 0,
+    512: 0,
+    1024: 0,
+    2048: 0,
+    highest: 0
+  });
+};
+
+const resetSessionAchievements = () => {
+  setSessionAchievements({
+    256: { unlocked: false, showBadge: false, count: 0 },
+    512: { unlocked: false, showBadge: false, count: 0 },
+    1024: { unlocked: false, showBadge: false, count: 0 },
+    2048: { unlocked: false, showBadge: false, count: 0 }
+  });
+};
+
+const resetAllAchievements = () => {
+  setAchievements({
+    256: { unlocked: false, showBadge: false, count: 0 },
+    512: { unlocked: false, showBadge: false, count: 0 },
+    1024: { unlocked: false, showBadge: false, count: 0 },
+    2048: { unlocked: false, showBadge: false, count: 0 }
+  });
+  localStorage.removeItem('2048-achievements');
+};
+
+const startTimer = () => {
+  setIsTimerRunning(true);
+  setIsGamePaused(false);
+};
+
+const pauseTimer = () => {
+  if (!isGamePaused) {
+    // Save current game state
+    setPausedState({
+      grid: JSON.parse(JSON.stringify(grid)),
+      time: gameTime,
+      score, // Add your score state if needed
+      aiPlaying // Add AI state if applicable
+    });
+    
+   
+  setIsTimerRunning(false);
+  setIsGamePaused(true);
+  setShowResumePopup(true);
+  }
+};
+
+const resumeTimer = () => {
+  if (isGamePaused) {
+    // Restore game state
+    if (pausedState) {
+      setGrid(pausedState.grid);
+      setGameTime(pausedState.time);
+      setScore(pausedState.score); // Restore your score state if needed
+      setAiPlaying(pausedState.aiPlaying); // Restore AI state if applicable
+      // Restore other states as needed
+    }
+  setIsTimerRunning(true);
+  setIsGamePaused(false);
+  setShowResumePopup(false);
+  }
+};
+
+const resetTimer = () => {
+  clearInterval(timerRef.current);
+    setGameTime(0);
+    setIsTimerRunning(false);
+    setIsGamePaused(false);
+    setPausedState(null);
+    setGrid(initializeGrid());
+};
+
+const formatTime = (seconds) => {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+  return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+};
+
+useEffect(() => {
+  const handleClickOutside = (e) => {
+    if (pauseButtonRef.current && !pauseButtonRef.current.contains(e.target)) {
+      setShowResumePopup(false);
+    }
+  };
+
+  if (showResumePopup) {
+    document.addEventListener('mousedown', handleClickOutside);
+  }
+  return () => {
+    document.removeEventListener('mousedown', handleClickOutside);
+  };
+}, [showResumePopup]);
+
+// Call this when a new tile is counted
 
   return (
     <div className="app">
       <header className="app-header">
       <h1>2048 Voice Controlled AI GAME</h1>
       </header>
+      <br/>
       <div className="header">
       <p>Join the numbers and get to the <strong>2048 tile!</strong></p>
         <div className="scores">
@@ -3077,7 +3431,7 @@ const speak = (text) => {
         <button 
     className="sound-toggle"
     onClick={() => {
-      [moveSound, mergeSound, appearSound, winSound, loseSound, bestScoreSound].forEach(sound => {
+      [moveSound, mergeSound, appearSound, winSound, loseSound, bestScoreSound, achievementSound].forEach(sound => {
         if (sound.current) {
           sound.current.muted = !sound.current.muted;
         }
@@ -3159,7 +3513,7 @@ const speak = (text) => {
        //tabIndex={0} // Make the div focusable
        //onKeyDown={(e) => e.preventDefault()}  // For debugging
        {...touchProps} >
-        <div className="grid">
+        <div className={`grid ${isGamePaused ? 'paused' : ''}`}>
   {grid.map((row, rowIndex) => (
     <div key={rowIndex} className="grid-row">
       {row.map((cell, colIndex) => (
@@ -3186,6 +3540,12 @@ const speak = (text) => {
     </div>
   ))}
 </div>
+{gameOver && !gameWon && (
+    <div className="game-over-indicator">
+      <span className="icon">💀</span>
+      <span className="text">Game Over!</span>
+    </div>
+  )}
 {gameOver && (
   <>
   <div className="game-over-overlay">
@@ -3221,12 +3581,7 @@ const speak = (text) => {
       </span>
     </div>
   )}
-  {gameOver && !gameWon && (
-    <div className="game-over-indicator">
-      <span className="icon">💀</span>
-      <span className="text">Game Over!</span>
-    </div>
-  )}
+  
    <button 
       className="close-indicator"
       onClick={() => setShowStatusIndicator(false)}
@@ -3235,18 +3590,161 @@ const speak = (text) => {
     </button>
 </div>
 )}
-              
+   <div className="timer-container">
+   {!aiPlaying && ( <div className="timer-display">
+        <span>⏱️ {formatTime(gameTime)}</span>
+      </div>
+      )}
+      {isGamePaused && (
+          <div className="pause-overlay">
+            <div className="pause-message">Game Paused</div>
+          </div>
+        )}
+      {!aiPlaying && (
+        <div className="timer-controls">
+          {isGamePaused ? (
+            
+            <button 
+            onClick={gameTime > 0 ? resumeTimer : resetGame} 
+            className="timer-button"
+          >
+            {gameTime > 0 ? '▶️ Resume' : '🕹️ Start Game'}
+          </button>
+          ) : (
+            <button ref={pauseButtonRef} onClick={pauseTimer} className={`pause-button ${isGamePaused ? 'active' : ''}`}>
+              ⏸️ Pause
+            </button>
+          )}
+        </div>
+      )}
+      {showResumePopup && (
+          <div className="resume-popup">
+            <button onClick={resumeTimer} className="resume-button">
+              ▶ Resume Game
+            </button>
+          </div>
+        )}
+    </div>
+    {!aiPlaying && (
+    <div className="hint-controls">
+  <button 
+    onClick={() => {
+      const hint = calculateHint();
+      setHintDirection(hint);
+      setShowHints(true);
+      setTimeout(() => setShowHints(false), 2000); // Auto-hide after 2 seconds
+    }}
+    disabled={gameOver || aiPlaying}
+  >
+    Show Hint
+  </button>
+  
+  <label className="hint-toggle">
+    <input 
+      type="checkbox" 
+      checked={showHints} 
+      onChange={(e) => setShowHints(e.target.checked)} 
+    />
+    Auto-hints
+  </label>
+</div>
+)}
 {directionHighlight && (
           <div className="direction-highlight" style={getDirectionHighlightStyle()}></div>
         )}
       </div>
-      <VoiceControl />
+      <div className="streaks-container">
+  <div className="streak-tracker">
+    <h3>Session Milestones</h3>
+    <div className="streak-items">
+      {[128, 256, 512, 1024, 2048].map(value => (
+        <div key={`session-${value}`} className="streak-item">
+          <span className={`tile-${value}`}>{value}</span>
+          <span className="count">×{sessionStreaks[value]}</span>
+        </div>
+      ))}
+    </div>
+    <div className="highest-tile">
+      Session Best: <span>{sessionStreaks.highest || '—'}</span>
+    </div>
+    <button onClick={resetSessionStreaks} className="reset-btn">
+      Reset Session
+    </button>
+  </div>
+
+  <div className="streak-tracker">
+    <h3>All-Time Milestones</h3>
+    <div className="streak-items">
+      {[128, 256, 512, 1024, 2048].map(value => (
+        <div key={`alltime-${value}`} className="streak-item">
+          <span className={`tile-${value}`}>{value}</span>
+          <span className="count">×{streaks[value]}</span>
+        </div>
+      ))}
+    </div>
+    <div className="highest-tile">
+      All-Time Best: <span>{streaks.highest || '—'}</span>
+    </div>
+    <button onClick={resetAllStreaks} className="reset-btn">
+      Reset All
+    </button>
+  </div>
+</div>
+<div className="achievement-containers">
+  {/* Persistent achievements */}
+  <div className="persistent-achievements">
+    {[256, 512, 1024, 2048].map(value => (
+      <AchievementBadge 
+        key={`perm-${value}`}
+        value={value}
+        show={achievements[value].showBadge}
+        count={achievements[value].count}
+      />
+    ))}
+  </div>
+  
+  {/* Session achievements */}
+  <div className="session-achievements">
+    {[256, 512, 1024, 2048].map(value => (
+      <AchievementBadge 
+        key={`sess-${value}`}
+        value={value}
+        show={sessionAchievements[value].showBadge}
+        count={sessionAchievements[value].count}
+        isSession={true}
+      />
+    ))}
+  </div>
+</div>
+
+<div className="unlocked-achievements">
+  <h3>Milestone Badges</h3>
+  <div className="achievement-grid">
+    {[256, 512, 1024, 2048].map(value => (
+      <div 
+        key={`achievement-${value}`} 
+        className={`achievement-cell ${achievements[value].unlocked ? 'unlocked' : 'locked'}`}
+      >
+        {achievements[value].unlocked ? (
+          <>
+            <div className="achievement-icon">{badgeInfo[value].icon}</div>
+            <div className="achievement-label">{value}! (×{achievements[value].count})</div>
+          </>
+        ) : (
+          <div className="achievement-locked">?</div>
+        )}
+      </div>
+    ))}
+  </div>
+</div>
+
+    {/*  <VoiceControl /> */}
       
-      <PuzzleControls />
-    {puzzleMode && <PuzzleObjectives />}
+    {/*}  <PuzzleControls />
+    {puzzleMode && <PuzzleObjectives />} */}
    {/*} {!puzzleMode && !showPuzzlePreview && <Grid grid={grid} />} 
     {puzzleMode && <Grid grid={grid} />} */}
-
+{!isGamePaused && (
       <div className="direction-hints">
         <button 
           className={`direction-btn up ${lastDirection === 'up' && directionHighlight ? 'active' : ''}`} 
@@ -3275,33 +3773,13 @@ const speak = (text) => {
           </button>
         </div>
       </div>
+    )}
       {PlayerStatsPanel({ playerStyle, gameState })} 
       {getStyleFeedback(playerStyle)}
       {ReplayControls({ replayState, setReplayState })}
       {ReplayAnalysis({ replayState, gameState })}
 
-      <div className="hint-controls">
-  <button 
-    onClick={() => {
-      const hint = calculateHint();
-      setHintDirection(hint);
-      setShowHints(true);
-      setTimeout(() => setShowHints(false), 2000); // Auto-hide after 2 seconds
-    }}
-    disabled={gameOver || aiPlaying}
-  >
-    Show Hint
-  </button>
-  
-  <label className="hint-toggle">
-    <input 
-      type="checkbox" 
-      checked={showHints} 
-      onChange={(e) => setShowHints(e.target.checked)} 
-    />
-    Auto-hints
-  </label>
-</div>
+      
 <button
   className="reset-adaptive-button"
   onClick={() => setAdaptiveDifficulty(prev => ({
