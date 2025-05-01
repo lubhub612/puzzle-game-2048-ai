@@ -80,7 +80,24 @@ function App() {
     highestTilePosition: { row: 0, col: 0 },
     lastMoveTime: null,
   });
- const[mergeCount, setMergeCount] = useState(0);
+  const [replayState, setReplayState] = useState({
+    isReplaying: false,
+    currentMove: 0,
+    moves: [], // Stores each move's grid state and metadata
+    analysis: null // Final game analysis
+  });
+  const [puzzleMode, setPuzzleMode] = useState(false);
+const [currentPuzzle, setCurrentPuzzle] = useState(null);
+const [puzzleObjectives, setPuzzleObjectives] = useState([]);
+const [showPuzzlePreview, setShowPuzzlePreview] = useState(false);
+const [selectedPuzzle, setSelectedPuzzle] = useState(null);
+const [voiceControl, setVoiceControl] = useState({
+  isListening: false,
+  lastCommand: '',
+  supported: true,
+  error : '',
+  feedback: ''
+});
   
   const moveCountRef = useRef(0);
   const moveSound = useRef(null);
@@ -236,11 +253,7 @@ function App() {
         }
       }
     }
-
-    setGameOver(true);
-    setShowStatusIndicator(true);
-    addToScoreHistory(score);
-    playSound(loseSound);
+    
     return true;
   }
 
@@ -454,7 +467,7 @@ function App() {
             }));
           }, 100);
 
-          if (newGrid[nextRow][nextCol] === 2048 && !gameWon) {
+          if (newGrid[nextRow][nextCol] === TARGET_VALUE && !gameWon) {
             setGameWon(true);
           }
         }
@@ -491,14 +504,6 @@ function App() {
     if (moved) {
       playSound(moveSound);
       setTileAnimations(newAnimations);
-      /*setGameState(prev => ({
-        ...prev,
-        merges: prev.merges + totalMergeCount,
-        totalMoves: prev.totalMoves + 1,
-        lastMoveTime: Date.now(),
-        riskyMoves: prev.riskyMoves + (isRiskyMove(grid, direction) ? 1 : 0),
-        highestTilePosition: getHighestTilePosition(newGrid),
-      }));  */
       setTimeout(() => {
         addRandomTile(newGrid);
      // const newScore = score + scoreIncrease;
@@ -522,15 +527,15 @@ function App() {
     }
     if (checkGameOver(newGrid)) {
       setGameOver(true);
+      setShowStatusIndicator(true);
+      addToScoreHistory(score);
+      playSound(loseSound);
     }
-   /* setPlayerStyle(prev => analyzePlayerStyle(prev, {
-      ...gameState,
-      merges: gameState.merges + totalMergeCount,
-      totalMoves: gameState.totalMoves + 1,
-      lastMoveTime: Date.now(),
-      riskyMoves: gameState.riskyMoves,
-      // other updated metrics
-    }));  */
+
+    if (puzzleMode) {
+      checkPuzzleObjectives(newGrid, totalMergeCount, direction);
+    }
+
     setGameState(prev => {
       const newState = {
         ...prev,
@@ -545,8 +550,28 @@ function App() {
       return newState;
     });
 
+    setReplayState(prev => ({
+      ...prev,
+      moves: [...prev.moves, {
+        grid: JSON.parse(JSON.stringify(newGrid)),
+        direction,
+        score: newScore,
+        merges: totalMergeCount,
+        timestamp: Date.now()
+      }]
+    }));
+
       setTimeout(() => setScoreUpdated(false), 300);
       
+    } else {
+      // Also check if game is over when no tiles moved
+      if (checkGameOver(grid)) {
+        setGameOver(true);
+        setShowStatusIndicator(true);
+        addToScoreHistory(score);
+        playSound(loseSound);
+        console.log("Game Over - No more moves available");
+      }
     }
   
     return moved;
@@ -2383,8 +2408,654 @@ const clearHistory = () => {
     );
   }
 
+  function ReplayControls({ replayState, setReplayState }) {
+    const canReplay = replayState.moves.length > 0;
+    const isReplaying = replayState.isReplaying;
+    const currentMove = replayState.currentMove;
+    const totalMoves = replayState.moves.length;
+  
+    return (
+      <div className="replay-controls">
+        <button
+          onClick={() => {
+            if (!canReplay) return;
+            setReplayState(prev => ({
+              ...prev,
+              isReplaying: !prev.isReplaying,
+              currentMove: 0
+            }));
+          }}
+          disabled={!canReplay}
+        >
+          {isReplaying ? 'Stop Replay' : 'Review Game'}
+        </button>
+  
+        {isReplaying && (
+          <div className="replay-navigation">
+            <button
+              onClick={() => setReplayState(prev => ({
+                ...prev,
+                currentMove: Math.max(0, prev.currentMove - 1)
+              }))}
+              disabled={currentMove === 0}
+            >
+              ◀ Previous
+            </button>
+            
+            <span>
+              Move {currentMove + 1} of {totalMoves}
+            </span>
+            
+            <button
+              onClick={() => setReplayState(prev => ({
+                ...prev,
+                currentMove: Math.min(totalMoves - 1, prev.currentMove + 1)
+              }))}
+              disabled={currentMove === totalMoves - 1}
+            >
+              Next ▶
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function ReplayAnalysis({ replayState, gameState }) {
+    if (!replayState.isReplaying) return null;
+  
+    const keyMoments = findKeyMoments(replayState.moves);
+  const currentKeyMoments = keyMoments.filter(m => m.move === replayState.currentMove);
+ // const currentMoveData = currentKeyMoments.length > 0 ? currentKeyMoments[0] : replayState.moves[replayState.currentMove];
+  const currentMoveData = replayState.moves[replayState.currentMove];
+    const isLastMove = replayState.currentMove === replayState.moves.length - 1;
+  
+    return (
+      <div className="replay-analysis">
+        <div className="replay-move-info">
+          <h3>Move Analysis</h3>
+          <p><strong>Direction:</strong> {currentMoveData.direction}</p>
+          <p><strong>Merges:</strong> {currentMoveData.merges}</p>
+          <p><strong>Score:</strong> {currentMoveData.score}</p>
+        </div>
+  
+        {isLastMove && (
+          <div className="game-summary">
+            <h3>Game Summary</h3>
+            <p><strong>Total Moves:</strong> {gameState.totalMoves}</p>
+            <p><strong>Total Merges:</strong> {gameState.merges}</p>
+            <p><strong>Merge Efficiency:</strong> {((gameState.merges / gameState.totalMoves) * 100).toFixed(1)}%</p>
+            <p><strong>Highest Tile:</strong> {Math.max(...currentMoveData.grid.flat())}</p>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function findKeyMoments(moves) {
+    const keyMoments = [];
+    let highestTile = 0;
+  
+    moves.forEach((move, index) => {
+      const currentMax = Math.max(...move.grid.flat());
+      
+      // Track when new highest tile was achieved
+      if (currentMax > highestTile) {
+        highestTile = currentMax;
+        keyMoments.push({
+          move: index,
+          type: 'new-high-tile',
+          value: currentMax
+        });
+      }
+  
+      // Track big merges (merging 128+ tiles)
+      if (move.merges > 0) {
+        const bigMerge = move.grid.flat().filter(x => x >= 128 && x === currentMax);
+        if (bigMerge.length > 0) {
+          keyMoments.push({
+            move: index,
+            type: 'big-merge',
+            value: bigMerge[0]
+          });
+        }
+      }
+    });
+  
+    return keyMoments;
+  }
+  
+  function generatePuzzle(difficulty = 'medium') {
+    const puzzleTypes = [
+      generateMergeChainPuzzle,
+      generateCornerChallenge,
+      generatePreciseMergePuzzle,
+      generateEfficiencyChallenge
+    ];
+    
+    const generator = puzzleTypes[Math.floor(Math.random() * puzzleTypes.length)];
+    return generator(difficulty);
+  }
+  
+  function generateMergeChainPuzzle(difficulty) {
+    const size = difficulty === 'hard' ? 5 : 4;
+    const targetChain = difficulty === 'easy' ? 3 : 
+                       difficulty === 'medium' ? 4 : 5;
+    
+    // Create a grid that requires chaining multiple merges
+    const grid = Array(size).fill().map(() => Array(size).fill(0));
+    
+    // Place starter tiles to create merge opportunities
+    const starterValues = [2, 2, 4, 4, 8];
+    for (let i = 0; i < targetChain; i++) {
+      const value = starterValues[Math.min(i, starterValues.length - 1)];
+      const x = Math.floor(Math.random() * size);
+      const y = Math.floor(Math.random() * size);
+      if (grid[x][y] === 0) grid[x][y] = value;
+    }
+    
+    return {
+      grid,
+      objectives: [
+        `Chain ${targetChain} merges in a single move`,
+        `Create a ${Math.pow(2, targetChain + 2)} tile`
+      ],
+      difficulty,
+      type: 'merge-chain'
+    };
+  }
+  
+  function generateCornerChallenge(difficulty) {
+    const size = 4;
+    const grid = Array(size).fill().map(() => Array(size).fill(0));
+    
+    // Place high-value tile in corner
+    const cornerValue = difficulty === 'easy' ? 64 : 
+                       difficulty === 'medium' ? 128 : 256;
+    grid[0][0] = cornerValue;
+    
+    // Surround with blocking tiles
+    const blockers = [2, 4, 8];
+    grid[0][1] = blockers[Math.floor(Math.random() * blockers.length)];
+    grid[1][0] = blockers[Math.floor(Math.random() * blockers.length)];
+    
+    // Add some random tiles
+    for (let i = 0; i < 6; i++) {
+      const x = Math.floor(Math.random() * size);
+      const y = Math.floor(Math.random() * size);
+      if (grid[x][y] === 0) {
+        grid[x][y] = Math.random() > 0.7 ? 4 : 2;
+      }
+    }
+    
+    return {
+      grid,
+      objectives: [
+        `Free the ${cornerValue} tile from the corner`,
+        `Merge it with another ${cornerValue} tile`
+      ],
+      difficulty,
+      type: 'corner-challenge'
+    };
+  }
+
+  function PuzzleControls() {
+    const startNewPuzzle = (difficulty) => {
+      const puzzle = generatePuzzle(difficulty);
+      setSelectedPuzzle(puzzle);
+      setShowPuzzlePreview(true);
+    };
+  
+    const confirmStartPuzzle = () => {
+      setCurrentPuzzle(selectedPuzzle);
+      setPuzzleMode(true);
+      setGrid(selectedPuzzle.grid);
+      setPuzzleObjectives(selectedPuzzle.objectives);
+      setScore(0);
+      setGameOver(false);
+      setShowPuzzlePreview(false);
+    };
+    return (
+      <div className="puzzle-controls">
+      <button onClick={() => startNewPuzzle('medium')}>
+        New Puzzle Challenge
+      </button>
+      
+      {puzzleMode && (
+        <button onClick={() => {
+          setPuzzleMode(false);
+          resetGame();
+        }}>
+          Exit Puzzle Mode
+        </button>
+      )}
+
+      {/* Puzzle Preview Modal */}
+      {showPuzzlePreview && selectedPuzzle && (
+        <div className="puzzle-preview-modal">
+          <div className="puzzle-preview-content">
+            <h3>New Puzzle Challenge</h3>
+            <p>Difficulty: {selectedPuzzle.difficulty}</p>
+            
+            <div className="puzzle-preview-grid">
+              <Grid grid={selectedPuzzle.grid} previewMode={true} />
+            </div>
+            
+            <div className="puzzle-objectives-preview">
+              <h4>Objectives:</h4>
+              <ul>
+                {selectedPuzzle.objectives.map((obj, i) => (
+                  <li key={i}>{obj}</li>
+                ))}
+              </ul>
+            </div>
+            
+            <div className="puzzle-preview-buttons">
+              <button onClick={() => setShowPuzzlePreview(false)}>
+                Cancel
+              </button>
+              <button 
+                onClick={confirmStartPuzzle}
+                className="start-puzzle-button"
+              >
+                Start Puzzle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+    );
+  }
+
+  function PuzzleObjectives() {
+    if (!puzzleMode) return null;
+    
+    return (
+      <div className="puzzle-objectives">
+        <h3>Puzzle Objectives</h3>
+        <ul>
+          {puzzleObjectives.map((obj, i) => (
+            <li key={i}>{obj}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  function checkPuzzleObjectives(grid, mergeCount, direction) {
+    if (!currentPuzzle) return;
+    
+    let completed = [];
+    
+    switch (currentPuzzle.type) {
+      case 'merge-chain':
+        if (mergeCount >= currentPuzzle.chainLength) {
+          completed.push(`Completed chain of ${mergeCount} merges!`);
+        }
+        break;
+        
+      case 'corner-challenge':
+        const cornerValue = currentPuzzle.grid[0][0];
+        if (grid[0][0] === 0 || grid[0][0] !== cornerValue) {
+          completed.push(`Freed the ${cornerValue} tile!`);
+        }
+        break;
+    }
+    
+    if (completed.length > 0) {
+      setPuzzleObjectives(prev => [...prev, ...completed]);
+      // You could add score bonuses or other rewards here
+    }
+  }
+
+  function generatePreciseMergePuzzle(difficulty) {
+  const size = 4;
+  const targetValue = difficulty === 'easy' ? 64 : 
+                     difficulty === 'medium' ? 128 : 256;
+  
+  const grid = Array(size).fill().map(() => Array(size).fill(0));
+  
+  // Set up a specific merge scenario
+  const positions = [
+    {x: 0, y: 0, value: targetValue/2},
+    {x: 0, y: 1, value: targetValue/2},
+    {x: 1, y: 0, value: targetValue/4},
+    {x: 1, y: 1, value: targetValue/4}
+  ];
+  
+  positions.forEach(pos => {
+    grid[pos.x][pos.y] = pos.value;
+  });
+  
+  // Add some random blockers
+  for (let i = 0; i < 4; i++) {
+    const x = Math.floor(Math.random() * size);
+    const y = Math.floor(Math.random() * size);
+    if (grid[x][y] === 0) {
+      grid[x][y] = [2, 4, 8][Math.floor(Math.random() * 3)];
+    }
+  }
+  
+  return {
+    grid,
+    objectives: [
+      `Create a ${targetValue} tile in exactly 2 moves`,
+      `Don't merge any other ${targetValue/2} tiles`
+    ],
+    difficulty,
+    type: 'precise-merge'
+  };
+}
+
+function generateEfficiencyChallenge(difficulty) {
+  const size = 4;
+  const targetMerges = difficulty === 'easy' ? 5 : 
+                       difficulty === 'medium' ? 8 : 12;
+  
+  const grid = Array(size).fill().map(() => Array(size).fill(0));
+  
+  // Create a grid with many merge opportunities
+  const values = [2, 2, 4, 4, 8, 8, 16, 16];
+  values.forEach(val => {
+    let placed = false;
+    while (!placed) {
+      const x = Math.floor(Math.random() * size);
+      const y = Math.floor(Math.random() * size);
+      if (grid[x][y] === 0) {
+        grid[x][y] = val;
+        placed = true;
+      }
+    }
+  });
+  
+  return {
+    grid,
+    objectives: [
+      `Perform ${targetMerges} merges in 5 moves`,
+      `Don't let any merges go to waste`
+    ],
+    difficulty,
+    type: 'efficiency-challenge'
+  };
+}
+
+function Grid({ grid, previewMode = false }) {
+  return (
+    <div className={`grid ${previewMode ? 'preview-mode' : ''}`}>
+      {grid.map((row, rowIndex) => (
+        <div key={rowIndex} className="grid-row">
+          {row.map((cell, colIndex) => (
+            <div 
+              key={colIndex} 
+              className={`grid-cell ${cell === 0 ? 'empty' : ''}`}
+              style={{ 
+                backgroundColor: getTileColor(cell),
+                color: cell > 4 ? '#f9f6f2' : '#776e65'
+              }}
+            >
+              {cell !== 0 ? cell : ''}
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+useEffect(() => {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    setVoiceControl(prev => ({ ...prev, supported: false }));
+    return;
+  }
+
+  const recognition = new SpeechRecognition();
+  recognition.continuous = true;
+  recognition.interimResults = false;
+  recognition.lang = 'en-US';
+
+  // Track recognition state more robustly
+  const recognitionState = {
+    active: false,
+    restartPending: false,
+    cleanupRequested: false
+  };
+
+  // Cleanup tracker
+  let cleanupCalled = false;
+
+  const startRecognition = () => {
+    if (cleanupCalled) return;
+    
+    if (!recognitionState.active && !recognitionState.restartPending) {
+      recognitionState.restartPending = true;
+      
+      setTimeout(() => {
+        if (cleanupCalled) return;
+        
+        try {
+          recognition.start();
+          recognitionState.active = true;
+          recognitionState.restartPending = false;
+          setVoiceControl(prev => ({ ...prev, active: true, error: null }));
+        } catch (err) {
+          console.error('Recognition start error:', err);
+          recognitionState.active = false;
+          recognitionState.restartPending = false;
+          
+          setVoiceControl(prev => ({ 
+            ...prev, 
+            active: false,
+            error: err.message.includes('already started') 
+              ? '' // Don't show this error to users
+              : 'Failed to start voice recognition'
+          }));
+          
+          // Schedule retry only if not already pending
+          if (!recognitionState.restartPending && !cleanupCalled) {
+            recognitionState.restartPending = true;
+            setTimeout(startRecognition, 1000);
+          }
+        }
+      }, 100);
+    }
+  };
+
+  const stopRecognition = () => {
+    try {
+      if (recognitionState.active) {
+        recognition.stop();
+      }
+    } catch (err) {
+      console.error('Recognition stop error:', err);
+    } finally {
+      recognitionState.active = false;
+      recognitionState.restartPending = false;
+    }
+  };
+
+  recognition.onresult = (event) => {
+    const last = event.results.length - 1;
+    const command = event.results[last][0].transcript.toLowerCase().trim();
+    
+    setVoiceControl(prev => ({ ...prev, lastCommand: command }));
+    
+    if (/up|move up|go up|slide up/i.test(command)) {
+      moveTiles(DIRECTIONS.UP);
+      speak('Moving up');
+    } else if (/down|move down|go down|slide down/i.test(command)) {
+      moveTiles(DIRECTIONS.DOWN);
+      speak('Moving down');
+    } else if (/left|move left|go left|slide left/i.test(command)) {
+      moveTiles(DIRECTIONS.LEFT);
+      speak('Moving left');
+    } else if (/right|move right|go right|slide right/i.test(command)) {
+      moveTiles(DIRECTIONS.RIGHT);
+      speak('Moving right');
+    } else if (/new game|reset|start over|restart/i.test(command)) {
+      resetGame();
+      speak('Starting a new game');
+    } else if (/toggle ai|switch ai|ai toggle|ai on off|turn ai/i.test(command)) {
+      // Programmatically click the AI button
+      const aiButton = document.querySelector('.ai-button');
+      if (aiButton) {
+        aiButton.click();
+        setVoiceControl(prev => ({ ...prev, feedback: 'AI toggled' }));
+        speak('AI toggled');
+      }
+    } else if (/start | start ai|enable ai|turn on ai|ai on/i.test(command)) {
+      if (!aiPlaying) {
+        const aiButton = document.querySelector('.ai-button');
+        if (aiButton) aiButton.click();
+        setVoiceControl(prev => ({ ...prev, feedback: 'AI started' }));
+        speak('AI started');
+      }
+    } else if (/stop | stop ai|disable ai|turn off ai|ai off/i.test(command)) {
+      if (aiPlaying) {
+        const aiButton = document.querySelector('.ai-button');
+        if (aiButton) aiButton.click();
+        setVoiceControl(prev => ({ ...prev, feedback: 'AI stopped' }));
+        speak('AI stopped');
+      }
+    }
+  };
+
+  recognition.onerror = (event) => {
+    console.error('Recognition error:', event.error);
+    recognitionState.active = false;
+    
+    if (event.error === 'not-allowed') {
+      setVoiceControl(prev => ({ 
+        ...prev, 
+        supported: false,
+        error: 'Microphone access denied. Please enable permissions.'
+      }));
+    } else if (event.error !== 'aborted') { // Ignore aborted errors
+      setVoiceControl(prev => ({ 
+        ...prev, 
+        active: false,
+        error: event.error === 'audio-capture' 
+          ? 'Microphone not available' 
+          : 'Voice recognition error'
+      }));
+      
+      // Attempt to restart after error
+      if (!recognitionState.restartPending && !cleanupCalled) {
+        recognitionState.restartPending = true;
+        setTimeout(startRecognition, 1000);
+      }
+    }
+  };
+
+  recognition.onend = () => {
+    recognitionState.active = false;
+    setVoiceControl(prev => ({ ...prev, active: false }));
+    
+    // Restart recognition only if not cleaning up
+    if (!recognitionState.restartPending && !cleanupCalled) {
+      recognitionState.restartPending = true;
+      setTimeout(startRecognition, 500);
+    }
+  };
+
+  // Initial start with delay to ensure proper initialization
+  const initialStartTimeout = setTimeout(() => {
+    if (!cleanupCalled) {
+      startRecognition();
+    }
+  }, 300);
+
+  // Cleanup function
+  return () => {
+    cleanupCalled = true;
+    clearTimeout(initialStartTimeout);
+    stopRecognition();
+  };
+}, [moveTiles, resetGame, setAiPlaying]);
+
+function VoiceControl() {
+  const toggleVoiceControl = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return;
+    
+    const recognition = new SpeechRecognition();
+    
+    if (!voiceControl.isListening) {
+      recognition.start();
+      setVoiceControl(prev => ({ ...prev, isListening: true }));
+    } else {
+      recognition.stop();
+      setVoiceControl(prev => ({ ...prev, isListening: false }));
+    }
+  };
+
+  if (!voiceControl.supported) {
+    return (
+      <div className="voice-control unsupported">
+        Voice control not supported in your browser
+      </div>
+    );
+  }
+
+  return (
+    <div className="voice-control">
+   {/*}   <button 
+        onClick={toggleVoiceControl}
+        className={voiceControl.isListening ? 'listening' : ''}
+      >
+        {voiceControl.isListening ? (
+          <>
+            <span className="pulse-animation"></span>
+            Listening...
+          </>
+        ) : 'Enable Voice Control'}
+      </button>
+*/}
+      
+<div className="voice-control-status">
+  {voiceControl.supported === false ? (
+    <div className="voice-unsupported">
+      Voice commands not supported in this browser
+    </div>
+  ) : voiceControl.error ? (
+    <div className="voice-error">
+      {voiceControl.error}
+    </div>
+  ) : voiceControl.active ? (
+    <div className="voice-active">
+      <span className="pulse-dot">●</span> Listening for commands...
+    </div>
+  ) : null}
+</div>
+  
+  
+  {voiceControl.lastCommand && (
+        <div className="voice-command">
+          Last command: "{voiceControl.lastCommand}"
+        </div>
+      )}
+
+      
+      <div className="voice-help">
+        <p>Try saying: "Up", "Down", "Left", "Right", "New Game"</p>
+      </div> 
+    </div>
+  );
+}
+
+const speak = (text) => {
+  const utterance = new SpeechSynthesisUtterance(text);
+  window.speechSynthesis.speak(utterance);
+};
+
+
+
   return (
     <div className="app">
+      <header className="app-header">
+      <h1>2048 Voice Controlled AI GAME</h1>
+      </header>
       <div className="header">
       <p>Join the numbers and get to the <strong>2048 tile!</strong></p>
         <div className="scores">
@@ -2417,6 +3088,7 @@ const clearHistory = () => {
     🔈
   </button>
       </div>
+      
       {showHistory && <ScoreHistory history={scoreHistory} />}
       
       <div className="controls">
@@ -2447,6 +3119,11 @@ const clearHistory = () => {
       </>
     ) : 'Start AI'}
   </button>
+  {voiceControl.feedback && (
+      <div className="voice-feedback">
+        {voiceControl.feedback}
+      </div>
+    )}
   
   {aiPlaying && (
     <div className="ai-speed-control">
@@ -2558,12 +3235,18 @@ const clearHistory = () => {
     </button>
 </div>
 )}
-
-
+              
 {directionHighlight && (
           <div className="direction-highlight" style={getDirectionHighlightStyle()}></div>
         )}
       </div>
+      <VoiceControl />
+      
+      <PuzzleControls />
+    {puzzleMode && <PuzzleObjectives />}
+   {/*} {!puzzleMode && !showPuzzlePreview && <Grid grid={grid} />} 
+    {puzzleMode && <Grid grid={grid} />} */}
+
       <div className="direction-hints">
         <button 
           className={`direction-btn up ${lastDirection === 'up' && directionHighlight ? 'active' : ''}`} 
@@ -2592,8 +3275,11 @@ const clearHistory = () => {
           </button>
         </div>
       </div>
-      {PlayerStatsPanel({ playerStyle, gameState })}
+      {PlayerStatsPanel({ playerStyle, gameState })} 
       {getStyleFeedback(playerStyle)}
+      {ReplayControls({ replayState, setReplayState })}
+      {ReplayAnalysis({ replayState, gameState })}
+
       <div className="hint-controls">
   <button 
     onClick={() => {
@@ -2687,6 +3373,21 @@ const clearHistory = () => {
         <p>Use arrow keys to move tiles. Join the numbers to get to 2048!</p>
         {aiPlaying && <p>AI is playing with Expectimax algorithm (depth: {aiDepth})</p>}
       </div>
+      <footer className="app-footer">
+        <div className="footer-content">
+          <p>Created with React</p>
+          <div className="voice-commands">
+            <h3>Voice Commands:</h3>
+            <ul>
+              <li>"Up", "Down", "Left", "Right"</li>
+              <li>"New Game" to restart</li>
+              <li>"Start AI" or "Stop AI"</li>
+              <li>"Toggle AI" to switch</li>
+            </ul>
+          </div>
+          <p>© {new Date().getFullYear()} 2048 Voice Game</p>
+        </div>
+      </footer>
     </div>
   );
 }
