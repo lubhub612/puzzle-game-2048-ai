@@ -36,6 +36,13 @@ const badgeInfo = {
   2048: { title: "2048 Legend", color: "#e74c3c", icon: "🌟" }
 };
 
+const defaultAchievements = {
+    256: { unlocked: false, showBadge: false, count: 0 },
+    512: { unlocked: false, showBadge: false, count: 0 },
+    1024: { unlocked: false, showBadge: false, count: 0 },
+    2048: { unlocked: false, showBadge: false, count: 0 }
+};
+
 function App() {
   const [grid, setGrid] = useState(initializeGrid());
   const [score, setScore] = useState(0);
@@ -126,12 +133,7 @@ const [sessionStreaks, setSessionStreaks] = useState({
 });
 const [achievements, setAchievements] = useState(() => {
   const saved = localStorage.getItem('2048-achievements');
-  return saved ? JSON.parse(saved) : {
-    256: { unlocked: false, showBadge: false, count: 0 },
-    512: { unlocked: false, showBadge: false, count: 0 },
-    1024: { unlocked: false, showBadge: false, count: 0 },
-    2048: { unlocked: false, showBadge: false, count: 0 }
-  };
+  return saved ? JSON.parse(saved) : defaultAchievements;
 });
 const [sessionAchievements, setSessionAchievements] = useState({
   256: { unlocked: false, showBadge: false },
@@ -147,8 +149,7 @@ const [bestTime, setBestTime] = useState(() => {
   return localStorage.getItem('2048-best-time') || 0;
 });
 const [showResumePopup, setShowResumePopup] = useState(false);
-  
-  
+
   const moveCountRef = useRef(0);
   const moveSound = useRef(null);
   const mergeSound = useRef(null);
@@ -619,6 +620,7 @@ if (savedAchievements) {
                   const newCount = prev[mergedValue].count + 1;   // Defined here
                   const shouldShow = !wasUnlocked || newCount % 5 === 0;
                   
+
                   const newState = {
                     ...prev,
                     [mergedValue]: {
@@ -643,12 +645,17 @@ if (savedAchievements) {
                       }
                     };
                   });
+
+                  
+                    
+
                    // Show badge if needed (from either tracker)
     const shouldShowBadge = 
     (!achievements[mergedValue].unlocked && !sessionAchievements[mergedValue].unlocked) || 
     (achievements[mergedValue].count + 1) % 5 === 0;
 
                   if (shouldShowBadge) {
+                    
                     setTimeout(() => {
                       setAchievements(prev => ({
                         ...prev,
@@ -658,6 +665,7 @@ if (savedAchievements) {
                         ...prev,
                         [mergedValue]: { ...prev[mergedValue], showBadge: false }
                       }));
+                      
                     }, 3000);
                     
                     playSound(achievementSound);
@@ -3404,6 +3412,8 @@ useEffect(() => {
 
 // Call this when a new tile is counted
 
+
+   
   return (
     <div className="app">
       <header className="app-header">
@@ -3694,26 +3704,63 @@ useEffect(() => {
   {/* Persistent achievements */}
   <div className="persistent-achievements">
     {[256, 512, 1024, 2048].map(value => (
-      <AchievementBadge 
+      <>
+       <div className="achievement-badge"
+         style={{ 
+           borderLeftColor: badgeInfo[value].color,
+           display: achievements[value].showBadge ? 'flex' : 'none'
+         }}>
+      <div className="badge-icon">{badgeInfo[value].icon}</div>
+      <div className="badge-content">
+        <div className="badge-title">
+          {badgeInfo[value].title} 
+        </div>
+        <div className="badge-value">
+          Reached {value}! (×{achievements[value].count})
+        </div>
+      </div>
+    </div>
+      </>
+    ))}
+      {/*<AchievementBadge 
         key={`perm-${value}`}
         value={value}
         show={achievements[value].showBadge}
         count={achievements[value].count}
       />
-    ))}
+    ))}  */}
+      
   </div>
   
   {/* Session achievements */}
   <div className="session-achievements">
     {[256, 512, 1024, 2048].map(value => (
-      <AchievementBadge 
+      <>
+      <div className="achievement-badge-session"
+         style={{ 
+           borderLeftColor: badgeInfo[value].color,
+           display: sessionAchievements[value].showBadge ? 'flex' : 'none'
+         }}>
+      <div className="badge-icon">{badgeInfo[value].icon}</div>
+      <div className="badge-content">
+        <div className="badge-title">
+          {badgeInfo[value].title}  {"Session"}
+        </div>
+        <div className="badge-value">
+          Reached {value}! (×{sessionAchievements[value].count})
+        </div>
+      </div>
+    </div>
+      </>
+    ))}
+    {/*}  <AchievementBadge 
         key={`sess-${value}`}
         value={value}
         show={sessionAchievements[value].showBadge}
         count={sessionAchievements[value].count}
         isSession={true}
       />
-    ))}
+    ))} */}
   </div>
 </div>
 
@@ -3736,8 +3783,37 @@ useEffect(() => {
       </div>
     ))}
   </div>
+  <button onClick={resetAllAchievements} className="reset-btn">
+      Reset Achievement Badge
+    </button>
 </div>
 
+<div className="unlocked-achievements">
+  <h3>Session Milestone Badges</h3>
+  <div className="achievement-grid">
+    {[256, 512, 1024, 2048].map(value => (
+      <div 
+        key={`achievement-${value}`} 
+        className={`achievement-cell ${sessionAchievements[value].unlocked ? 'unlocked' : 'locked'}`}
+      >
+        {sessionAchievements[value].unlocked ? (
+          <>
+            <div className="achievement-icon">{badgeInfo[value].icon}</div>
+            <div className="achievement-label">{value}! (×{sessionAchievements[value].count})</div>
+          </>
+        ) : (
+          <div className="achievement-locked">?</div>
+        )}
+      </div>
+    ))}
+  </div>
+  <button onClick={resetSessionAchievements} className="reset-btn">
+      Reset Session AchievementBadge
+    </button>
+</div>
+
+      
+    
     {/*  <VoiceControl /> */}
       
     {/*}  <PuzzleControls />

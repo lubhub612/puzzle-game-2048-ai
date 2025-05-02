@@ -2380,4 +2380,51 @@ button:hover {
   z-index: 5;
 }
 
+.achievement-tracker {
+  display: flex;
+  gap: 15px;
+  padding: 10px;
+  background: rgba(238, 228, 218, 0.5);
+  border-radius: 8px;
+  margin: 10px 0;
+}
+
+.achievement-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.tile-256, .tile-512, .tile-1024, .tile-2048 {
+  padding: 2px 8px;
+  border-radius: 3px;
+  font-weight: bold;
+  margin-bottom: 3px;
+}
+
+.count1 {
+  font-size: 0.8rem;
+  color: red;
+}
+
+.achievement-badge-session {
+  position: relative;
+  background: white;
+  border-radius: 8px;
+  padding: 10px 15px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+  display: flex;
+  align-items: center;
+  animation: slideIn 0.5s ease-out;
+  border-left: 5px solid;
+  margin-bottom: 5px;
+  background: #f8f4ff;
+  border-left-color: #9c88ff !important;
+}
+
+
+
 /* Keep your existing tile and animation styles */
